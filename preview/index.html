@@ -222,9 +222,27 @@ function standPoint(hit, from) {          // floor point to stand on for a click
   if (down) return down.point;                                   // clicked a floor-like surface
   const back = from.clone().sub(p); back.y = 0;                  // clicked a wall: step back and drop
   if (back.lengthSq() < 1e-6) back.set(0, 0, 1);
-  const q = p.clone().add(back.normalize().multiplyScalar(0.6)); q.y += 0.05;
+  const q = p.clone().add(back.normalize().multiplyScalar(1.2)); q.y += 0.05;
   const f = castFirst(q, DOWN);
   return f ? f.point : new THREE.Vector3(q.x, groundY, q.z);
+}
+const UP = new THREE.Vector3(0, 1, 0);
+function isStandable(p) {                 // a real floor: flat around the point and no ceiling at head height
+  for (const [dx, dz] of [[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4]]) {
+    const h = castFirst(new THREE.Vector3(p.x + dx, p.y + 0.3, p.z + dz), DOWN, 0.6);
+    if (!h || Math.abs(h.point.y - p.y) > 0.25) return false;
+  }
+  return !castFirst(new THREE.Vector3(p.x, p.y + 0.1, p.z), UP, 1.9);
+}
+function clearYaw(eye, yaw) {             // turn away from a wall right in front of the eyes
+  let best = yaw, bestD = -1;
+  for (const off of [0, 0.5, -0.5, 1.05, -1.05, 1.57, -1.57, 2.36, -2.36, 3.14]) {
+    const h = castFirst(eye, fwdOf(yaw + off, 0));
+    const d = h ? h.distance : 1e9;
+    if (d >= 3) return yaw + off;
+    if (d > bestD) { bestD = d; best = yaw + off; }
+  }
+  return best;
 }
 function startWalkFly(foot, dur = 900) {
   walkFly = { t0: performance.now(), dur, p0: camera.position.clone(), p1: foot.clone().add(new THREE.Vector3(0, EYE, 0)),
@@ -235,13 +253,16 @@ function enterWalk() {
   flight = null;
   const d = new THREE.Vector3(); camera.getWorldDirection(d);
   walk = { yaw: Math.atan2(d.x, d.z), pitch: Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) };
-  let hit = screenHit(innerWidth / 2, innerHeight / 2);
-  let foot;
-  if (hit) foot = standPoint(hit, camera.position);
-  else {
+  ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const hits = ray.intersectObject(model, true).filter(h => h.point.y <= cutLimit());
+  let foot = null;
+  for (const h of hits.slice(0, 12)) if (isStandable(h.point)) { foot = h.point.clone(); break; }
+  if (!foot && hits.length) foot = standPoint(hits[0], camera.position);
+  if (!foot) {
     const t = controls.target.clone(); t.y = Math.min(cutLimit() - 0.01, NO_CUT);
     const f = castFirst(t, DOWN); foot = f ? f.point : new THREE.Vector3(controls.target.x, groundY, controls.target.z);
   }
+  walk.yaw = clearYaw(foot.clone().add(new THREE.Vector3(0, EYE, 0)), walk.yaw);
   walk.pitch = Math.max(-0.35, walk.pitch);
   controls.enabled = false;
   camera.near = 0.05; camera.updateProjectionMatrix();
