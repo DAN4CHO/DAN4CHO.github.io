@@ -33,6 +33,10 @@
   #joy{position:fixed;left:22px;bottom:96px;width:124px;height:124px;border-radius:50%;display:none;touch-action:none;z-index:5}
   #joy i{position:absolute;left:50%;top:50%;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(255,255,255,.25);border:1px solid var(--line);pointer-events:none}
   body.walk.touch #joy{display:block}
+  #vert{position:fixed;right:22px;bottom:96px;display:none;flex-direction:column;gap:12px;z-index:5}
+  body.walk.touch #vert{display:flex}
+  #vert button{width:58px;height:58px;border-radius:50%;font-size:20px;color:var(--text);touch-action:none;-webkit-user-select:none;user-select:none}
+  #vert button.on{background:rgba(255,181,71,.35)}
   #cut{display:flex;align-items:center;gap:10px;padding:0 10px 0 12px;border-left:1px solid var(--line);margin-left:4px;height:34px}
   #cut label{font-size:13px;color:var(--muted);white-space:nowrap}
   #cut output{font-size:13px;min-width:62px;font-variant-numeric:tabular-nums}
@@ -100,6 +104,7 @@
   </div>
 </div>
 <div id="joy" class="panel"><i></i></div>
+<div id="vert"><button class="panel" id="upBtn" aria-label="Выше">▲</button><button class="panel" id="downBtn" aria-label="Ниже">▼</button></div>
 <div id="loader">
   <div class="box">
     <h1>PERMM</h1>
@@ -257,9 +262,9 @@ function clearYaw(eye, yaw) {             // turn away from a wall right in fron
   }
   return best;
 }
-function startWalkFly(foot, dur = 900) {
+function startWalkFly(foot, dur = 900, keepPitch = false) {
   walkFly = { t0: performance.now(), dur, p0: camera.position.clone(), p1: foot.clone().add(new THREE.Vector3(0, EYE, 0)),
-              pitch0: walk.pitch, pitch1: Math.max(-0.35, Math.min(0.1, walk.pitch)) };
+              pitch0: walk.pitch, pitch1: keepPitch ? walk.pitch : Math.max(-0.35, Math.min(0.1, walk.pitch)) };
 }
 function enterWalk() {
   if (!model || walk) return;
@@ -286,7 +291,7 @@ function enterWalk() {
 function exitWalk(keepView = true) {
   if (!walk) return;
   const f = fwdOf(walk.yaw, walk.pitch);
-  walk = null; walkFly = null; keys.clear(); joy.x = joy.y = 0;
+  walk = null; walkFly = null; keys.clear(); joy.x = joy.y = 0; vert = 0;
   controls.target.copy(camera.position).addScaledVector(f, 4);
   controls.enabled = true; controls.update();
   document.body.classList.remove('walk'); walkBtn.classList.remove('on'); walkBtn.textContent = 'Прогулка';
@@ -297,7 +302,7 @@ function walkTo(clientX, clientY) {
   if (hit) startWalkFly(standPoint(hit, camera.position), 800);
 }
 walkBtn.addEventListener('click', () => (walk ? exitWalk() : enterWalk()));
-window.__viewer = { camera, controls, get walk() { return walk; }, get model() { return model; }, screenHit, castFirst, standPoint };
+window.__viewer = { camera, controls, get walk() { return walk; }, get model() { return model; }, screenHit, castFirst, standPoint, step: dt => stepWalk(dt), snapToFloor: () => snapToFloor(), setVert: d => { vert = d; } };
 
 // look around: drag on the canvas (grab-the-world style)
 let look = null;
@@ -334,7 +339,27 @@ addEventListener('keydown', e => {
   if (document.activeElement && document.activeElement.tagName === 'INPUT') document.activeElement.blur();
   keys.add(e.code); e.preventDefault();
 });
-addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('keyup', e => {
+  const wasVert = keys.has(e.code) && (e.code === 'KeyQ' || e.code === 'KeyE');
+  keys.delete(e.code);
+  if (wasVert && walk && !keys.has('KeyQ') && !keys.has('KeyE')) snapToFloor();
+});
+
+// up / down (phones: hold the buttons; release lands on the floor below if it is close)
+let vert = 0;
+function snapToFloor() {
+  if (!walk || walkFly) return;
+  // start a bit above the eyes so a release inside a floor slab still finds the slab's top
+  const h = castFirst(camera.position.clone().add(new THREE.Vector3(0, 0.4, 0)), DOWN, 0.4 + EYE + 2.5);
+  if (h && Math.abs(h.point.y + EYE - camera.position.y) > 0.05) startWalkFly(h.point, 350, true);
+}
+for (const [id, dir] of [['upBtn', 1], ['downBtn', -1]]) {
+  const b = document.getElementById(id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); vert = dir; b.classList.add('on'); });
+  const stop = () => { if (vert === dir) { vert = 0; b.classList.remove('on'); snapToFloor(); } };
+  b.addEventListener('pointerup', stop); b.addEventListener('pointercancel', stop);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+}
 addEventListener('blur', () => keys.clear());
 
 // joystick (phones)
@@ -368,13 +393,13 @@ function stepWalk(dt) {
   if (keys.has('ArrowRight')) turn -= 1;
   if (keys.has('KeyE')) u += 1;
   if (keys.has('KeyQ')) u -= 1;
-  f += joy.y; s += joy.x;
+  f += joy.y; s += joy.x; u += vert;
   if (!f && !s && !u && !turn) return false;
   const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? 6 : 2.2;
   walk.yaw += turn * 1.8 * dt;
   const fw = fwdOf(walk.yaw, 0), right = new THREE.Vector3(-fw.z, 0, fw.x);
   camera.position.addScaledVector(fw, f * speed * dt).addScaledVector(right, s * speed * dt);
-  camera.position.y += u * 2 * dt;
+  camera.position.y += u * 3 * dt;
   aim();
   return true;
 }
@@ -395,7 +420,7 @@ const CTRL = {
     ? [['Вращать', 'вести пальцем'], ['Сдвигать', 'два пальца'], ['Масштаб', 'щипок'], ['Подлететь к точке', 'двойной тап']]
     : [['Вращать', 'зажать ЛКМ и вести'], ['Сдвигать', 'зажать ПКМ и вести'], ['Масштаб', 'колесо мыши'], ['Подлететь к точке', 'двойной клик']],
   walk: IS_MOBILE
-    ? [['Идти', 'джойстик слева'], ['Смотреть', 'вести пальцем'], ['Перейти в точку', 'двойной тап']]
+    ? [['Идти', 'джойстик слева'], ['Смотреть', 'вести пальцем'], ['Выше / ниже', 'держать ▲ ▼ справа'], ['Перейти в точку', 'двойной тап']]
     : [['Идти', 'W A S D'], ['Смотреть', 'зажать ЛКМ и вести'], ['Повернуться', '← →'], ['Быстрее', 'зажать Shift'],
        ['Вниз / вверх', 'Q / E'], ['Перейти в точку', 'двойной клик']]
 };
