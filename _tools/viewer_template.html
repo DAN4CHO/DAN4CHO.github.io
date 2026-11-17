@@ -302,7 +302,7 @@ function walkTo(clientX, clientY) {
   if (hit) startWalkFly(standPoint(hit, camera.position), 800);
 }
 walkBtn.addEventListener('click', () => (walk ? exitWalk() : enterWalk()));
-window.__viewer = { camera, controls, get walk() { return walk; }, get model() { return model; }, screenHit, castFirst, standPoint };
+window.__viewer = { camera, controls, get walk() { return walk; }, get model() { return model; }, screenHit, castFirst, standPoint, step: dt => stepWalk(dt), snapToFloor: () => snapToFloor(), setVert: d => { vert = d; } };
 
 // look around: drag on the canvas (grab-the-world style)
 let look = null;
