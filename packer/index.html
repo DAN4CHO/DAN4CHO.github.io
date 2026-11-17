@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Упаковщик 3D-моделей</title>
+<style>
+  :root{--bg1:#14161a;--bg2:#1d2026;--panel:rgba(255,255,255,.045);--line:rgba(255,255,255,.1);--text:#f3f4f6;--muted:#a3a8b3;--accent:#ffb547;--ok:#7ad38f;--warn:#ff8b7b}
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:linear-gradient(180deg,var(--bg1),var(--bg2));color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px;line-height:1.5}
+  main{max-width:640px;margin:0 auto;padding:40px 20px 60px}
+  h1{font-size:24px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  h1 i{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .sub{color:var(--muted);margin:0 0 28px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:600}
+  #drop{border:2px dashed rgba(255,255,255,.18);border-radius:12px;padding:30px 16px;text-align:center;cursor:pointer;transition:.2s}
+  #drop:hover,#drop.over{border-color:var(--accent);background:rgba(255,181,71,.06)}
+  #drop b{display:block;font-size:16px;margin-bottom:4px}
+  #drop span{color:var(--muted);font-size:14px}
+  label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+  input[type=text]{width:100%;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:10px;color:var(--text);font:inherit;padding:10px 12px;outline:none}
+  input[type=text]:focus{border-color:var(--accent)}
+  .addr{display:flex;align-items:center;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:10px;padding-left:12px}
+  .addr span{color:var(--muted);white-space:nowrap}
+  .addr input{border:0;background:none;padding-left:0}
+  .hint{font-size:13px;color:var(--muted);margin-top:6px}
+  .hint.warn{color:var(--accent)}
+  button.main,a.main{display:inline-flex;align-items:center;justify-content:center;gap:8px;margin-top:18px;width:100%;padding:13px;border:0;border-radius:12px;
+    background:var(--accent);color:#1b1407;font:inherit;font-weight:700;cursor:pointer;text-decoration:none}
+  button.main:disabled{opacity:.35;cursor:default}
+  .ghost{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
+  #log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted);white-space:pre-wrap;max-height:220px;overflow:auto}
+  .bar{height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden;margin-bottom:12px}
+  .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:6px}
+  .stats div{background:rgba(0,0,0,.2);border-radius:10px;padding:10px 12px}
+  .stats b{display:block;font-size:18px}
+  .stats span{font-size:12px;color:var(--muted)}
+  ol{margin:0;padding-left:20px}
+  ol li{margin-bottom:8px}
+  a{color:var(--accent)}
+  code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:5px;font-size:.92em}
+  .link{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+  .link code{font-size:14px}
+  .err{color:var(--warn)}
+  .hidden{display:none}
+  .foot{color:var(--muted);font-size:13px;text-align:center;margin-top:24px}
+</style>
+</head>
+<body>
+<main>
+  <h1><i></i>Упаковщик 3D-моделей</h1>
+  <p class="sub">GLB из SketchUp → страница с 3D для клиента на dan4cho.github.io</p>
+
+  <div class="card">
+    <h2>1. Модель</h2>
+    <div id="drop"><b>Перетащи сюда .glb</b><span>или нажми, чтобы выбрать файл</span></div>
+    <input type="file" id="file" accept=".glb" hidden>
+    <div id="fileInfo" class="hint"></div>
+    <label for="title">Название на странице</label>
+    <input type="text" id="title" placeholder="Например: PERMM">
+    <label for="slug">Адрес страницы</label>
+    <div class="addr"><span>dan4cho.github.io/</span><input type="text" id="slug" placeholder="permm" spellcheck="false"><span style="padding-right:12px">/</span></div>
+    <div id="slugHint" class="hint">Только латиница, цифры и дефис.</div>
+    <button class="main" id="go" disabled>Собрать</button>
+  </div>
+
+  <div class="card hidden" id="progress">
+    <h2>2. Сборка</h2>
+    <div class="bar"><i id="bar"></i></div>
+    <div id="log"></div>
+  </div>
+
+  <div class="card hidden" id="result">
+    <h2>3. Залить на GitHub</h2>
+    <div class="stats">
+      <div><b id="sSize"></b><span>вес модели</span></div>
+      <div><b id="sTris"></b><span>треугольников</span></div>
+      <div><b id="sDraws"></b><span>отрисовок</span></div>
+    </div>
+    <div id="advice" class="hint warn"></div>
+    <a class="main" id="dl" download>Скачать ZIP</a>
+    <ol style="margin-top:20px">
+      <li>Распакуй ZIP (правой кнопкой → «Извлечь всё»). Внутри будет папка <code class="slugName"></code>.</li>
+      <li>Открой <a href="https://github.com/DAN4CHO/DAN4CHO.github.io/upload/main" target="_blank" rel="noopener">страницу загрузки на GitHub</a> (нужно быть залогиненным).</li>
+      <li>Перетащи туда <b>папку <code class="slugName"></code> целиком</b>, а не файлы из неё.</li>
+      <li>Дождись, пока все файлы загрузятся, и нажми зелёную кнопку <b>Commit changes</b> внизу.</li>
+      <li>Через 1–2 минуты страница будет готова:
+        <div class="link"><code id="finalUrl"></code><button class="ghost" id="copy">Скопировать</button></div>
+      </li>
+    </ol>
+    <p class="hint">Если папка с таким адресом уже была, новые файлы её заменят, а ссылка останется прежней. После обновления, если видна старая версия, обнови страницу с очисткой кэша (Ctrl+F5).</p>
+  </div>
+
+  <p class="foot">Всё считается у тебя в браузере, модель никуда не отправляется.</p>
+</main>
+
+<script>
+// ===== GLB optimizer for web viewing: JS port of tools/optimize_glb.py =====
+// optimizeGLB(arrayBuffer, { resizeImage, log }) -> { glb: Uint8Array, stats }
+// resizeImage(bytes: Uint8Array, mime: string, maxSide: number) -> Promise<Uint8Array>
+
+const GLB_CT = { 5120: Int8Array, 5121: Uint8Array, 5122: Int16Array, 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array };
+const GLB_NC = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+const BOXIFY_PREFIXES = ['Led screen'];   // heavy decorative parts replaced by their bounding box
+const BOX_MIN_TRIS = 2000;
+const MAX_TEX = 1024;
+const MIN_INST = 2;
+
+function parseGLB(ab) {
+  const dv = new DataView(ab);
+  if (ab.byteLength < 20 || dv.getUint32(0, true) !== 0x46546C67) throw new Error('это не GLB-файл (нужен экспорт GLTF Binary *.glb)');
+  const jlen = dv.getUint32(12, true);
+  const J = JSON.parse(new TextDecoder().decode(new Uint8Array(ab, 20, jlen)));
+  const off = 20 + jlen;
+  let BIN = new Uint8Array(0);
+  if (off + 8 <= ab.byteLength) BIN = new Uint8Array(ab, off + 8, dv.getUint32(off, true));
+  return { J, BIN };
+}
+
+// 4x4 matrices: Float64Array(16), row-major M[r*4+c]
+function nodeMat(n) {
+  const m = new Float64Array(16);
+  if (n.matrix) { for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) m[r * 4 + c] = n.matrix[c * 4 + r]; return m; }
+  const t = n.translation || [0, 0, 0], q = n.rotation || [0, 0, 0, 1], s = n.scale || [1, 1, 1];
+  const [x, y, z, w] = q;
+  const R = [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+             2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+             2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) m[r * 4 + c] = R[r * 3 + c] * s[c];
+  m[3] = t[0]; m[7] = t[1]; m[11] = t[2]; m[15] = 1;
+  return m;
+}
+function mul4(A, B) {
+  const C = new Float64Array(16);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    let v = 0; for (let k = 0; k < 4; k++) v += A[r * 4 + k] * B[k * 4 + c]; C[r * 4 + c] = v;
+  }
+  return C;
+}
+const IDENT = (() => { const m = new Float64Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; })();
+function det3(M) {
+  const a = M[0], b = M[1], c = M[2], d = M[4], e = M[5], f = M[6], g = M[8], h = M[9], i = M[10];
+  return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+}
+function inv3(M) {      // inverse of the upper-left 3x3, row-major 9
+  const a = M[0], b = M[1], c = M[2], d = M[4], e = M[5], f = M[6], g = M[8], h = M[9], i = M[10];
+  const D = det3(M) || 1e-30;
+  return [(e * i - f * h) / D, (c * h - b * i) / D, (b * f - c * e) / D,
+          (f * g - d * i) / D, (a * i - c * g) / D, (c * d - a * f) / D,
+          (d * h - e * g) / D, (b * g - a * h) / D, (a * e - b * d) / D];
+}
+function mirrorCol(M) { const C = M.slice(); C[0] = -C[0]; C[4] = -C[4]; C[8] = -C[8]; C[12] = -C[12]; return C; }
+
+function decompose(M) {          // [t, quat xyzw, s] or null if mirrored / sheared
+  if (det3(M) <= 0) return null;
+  const s = [0, 1, 2].map(c => Math.hypot(M[c], M[4 + c], M[8 + c]));
+  if (s.some(v => v < 1e-9)) return null;
+  const R = [];                                       // R[r][c]
+  for (let r = 0; r < 3; r++) R.push([0, 1, 2].map(c => M[r * 4 + c] / s[c]));
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let v = 0; for (let k = 0; k < 3; k++) v += R[k][i] * R[k][j];
+    if (Math.abs(v - (i === j ? 1 : 0)) > 1e-3) return null;
+  }
+  const tr = R[0][0] + R[1][1] + R[2][2];
+  let x, y, z, w, S;
+  if (tr > 0) {
+    S = Math.sqrt(tr + 1) * 2; w = 0.25 * S;
+    x = (R[2][1] - R[1][2]) / S; y = (R[0][2] - R[2][0]) / S; z = (R[1][0] - R[0][1]) / S;
+  } else if (R[0][0] > R[1][1] && R[0][0] > R[2][2]) {
+    S = Math.sqrt(1 + R[0][0] - R[1][1] - R[2][2]) * 2;
+    w = (R[2][1] - R[1][2]) / S; x = 0.25 * S; y = (R[0][1] + R[1][0]) / S; z = (R[0][2] + R[2][0]) / S;
+  } else if (R[1][1] > R[2][2]) {
+    S = Math.sqrt(1 + R[1][1] - R[0][0] - R[2][2]) * 2;
+    w = (R[0][2] - R[2][0]) / S; x = (R[0][1] + R[1][0]) / S; y = 0.25 * S; z = (R[1][2] + R[2][1]) / S;
+  } else {
+    S = Math.sqrt(1 + R[2][2] - R[0][0] - R[1][1]) * 2;
+    w = (R[1][0] - R[0][1]) / S; x = (R[0][2] + R[2][0]) / S; y = (R[1][2] + R[2][1]) / S; z = 0.25 * S;
+  }
+  const qn = Math.hypot(x, y, z, w);
+  return [[M[3], M[7], M[11]], [x / qn, y / qn, z / qn, w / qn], s];
+}
+
+function boxGeom(lo, hi) {
+  const P = [], N = [], I = [];
+  for (let axis = 0; axis < 3; axis++) for (const sign of [-1, 1]) {
+    const [u, v] = [0, 1, 2].filter(a => a !== axis); const base = P.length / 3;
+    for (const [cu, cv] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+      const pt = [0, 0, 0]; pt[axis] = sign > 0 ? hi[axis] : lo[axis];
+      pt[u] = cu ? hi[u] : lo[u]; pt[v] = cv ? hi[v] : lo[v];
+      P.push(...pt); const nn = [0, 0, 0]; nn[axis] = sign; N.push(...nn);
+    }
+    I.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  return { P: Float64Array.from(P), N: Float64Array.from(N), UV: null, I: Uint32Array.from(I), nv: P.length / 3 };
+}
+
+function minmax3(P) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < P.length; i += 3) for (let k = 0; k < 3; k++) {
+    const v = P[i + k]; if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v;
+  }
+  return [lo, hi];
+}
+const spanOf = (lo, hi) => [0, 1, 2].map(k => Math.max(hi[k] - lo[k], 1e-6) / 65535);
+const roundHalfEven = v => { const r = Math.round(v); return (Math.abs(v % 1) === 0.5 && r % 2 !== 0) ? r - 1 : r; };
+
+async function sha1hex(u8) {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-1', u8));
+  return Array.from(d, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function optimizeGLB(ab, opts = {}) {
+  const log = opts.log || (() => {});
+  const resizeImage = opts.resizeImage || (async d => d);
+  const { J, BIN } = parseGLB(ab);
+  const N = J.nodes || [], A = J.accessors || [], BV = J.bufferViews || [];
+  const IMGS = J.images || [], TEXS = J.textures || [], MATS = J.materials || [], MESHES = J.meshes || [];
+
+  const cache = new Map();
+  const acc = i => {
+    if (cache.has(i)) return cache.get(i);
+    const a = A[i], bv = BV[a.bufferView];
+    const T = GLB_CT[a.componentType], nc = GLB_NC[a.type], isz = T.BYTES_PER_ELEMENT;
+    const start = BIN.byteOffset + (bv.byteOffset || 0) + (a.byteOffset || 0);
+    const stride = bv.byteStride || isz * nc;
+    let arr;
+    if (stride === isz * nc && start % isz === 0) arr = new T(BIN.buffer, start, a.count * nc);
+    else {
+      arr = new T(a.count * nc); const src = new Uint8Array(BIN.buffer), dst = new Uint8Array(arr.buffer), row = isz * nc;
+      for (let k = 0; k < a.count; k++) dst.set(src.subarray(start + k * stride, start + k * stride + row), k * row);
+    }
+    cache.set(i, arr); return arr;
+  };
+
+  // ---- collect (primitive key -> world matrices)
+  const uses = new Map(), keyInfo = new Map(), boxify = new Set();
+  let srcTris = 0;
+  const walk = (ni, M, simplify) => {
+    const n = N[ni]; M = mul4(M, nodeMat(n));
+    simplify = simplify || BOXIFY_PREFIXES.some(p => (n.name || '').startsWith(p));
+    if (n.mesh !== undefined) for (const p of MESHES[n.mesh].primitives) {
+      if ((p.mode ?? 4) !== 4) continue;                     // triangles only
+      const at = p.attributes; if (at.POSITION === undefined) continue;
+      const k = [at.POSITION, at.NORMAL ?? null, at.TEXCOORD_0 ?? null, p.indices ?? null, p.material ?? null];
+      const ks = k.join('|');
+      if (!uses.has(ks)) { uses.set(ks, []); keyInfo.set(ks, k); }
+      uses.get(ks).push(M);
+      const tris = Math.floor((p.indices !== undefined ? A[p.indices].count : A[at.POSITION].count) / 3);
+      srcTris += tris;
+      if (simplify && tris >= BOX_MIN_TRIS) boxify.add(ks);
+    }
+    for (const c of n.children || []) walk(c, M, simplify);
+  };
+  const scene = (J.scenes || [])[J.scene || 0];
+  if (!scene) throw new Error('в файле нет сцены');
+  for (const r of scene.nodes || []) walk(r, IDENT, false);
+  log(`Объектов в модели: ${N.length}, уникальных деталей: ${uses.size}`);
+
+  const geom = ks => {
+    const [pi, nI, uI, iI] = keyInfo.get(ks);
+    const Pf = acc(pi);
+    if (boxify.has(ks)) { const [lo, hi] = minmax3(Pf); return boxGeom(lo, hi); }
+    const nv = Pf.length / 3;
+    let I;
+    if (iI !== null) I = acc(iI); else { I = new Uint32Array(nv); for (let i = 0; i < nv; i++) I[i] = i; }
+    return { P: Float64Array.from(Pf), N: nI !== null ? Float64Array.from(acc(nI)) : null,
+             UV: uI !== null ? acc(uI) : null, I, nv };
+  };
+
+  // ---- materials
+  const mats = [], textured = [];
+  for (const m0 of MATS) {
+    const m = JSON.parse(JSON.stringify(m0)); delete m.extensions;
+    const pbr = m.pbrMetallicRoughness || (m.pbrMetallicRoughness = {});
+    pbr.metallicFactor = 0.0; pbr.roughnessFactor = 0.75;
+    const alpha = (pbr.baseColorFactor || [1, 1, 1, 1])[3];
+    const tex = pbr.baseColorTexture;
+    const png = tex !== undefined && IMGS[TEXS[tex.index].source].mimeType === 'image/png';
+    if (m.alphaMode === 'BLEND' || alpha < 0.999) m.alphaMode = 'BLEND';
+    else if (png) { m.alphaMode = 'MASK'; m.alphaCutoff = 0.5; }
+    else { m.alphaMode = 'OPAQUE'; delete m.alphaCutoff; }
+    m.doubleSided = true;
+    mats.push(m); textured.push(tex !== undefined);
+  }
+
+  // ---- output buffer
+  const chunks = []; let outLen = 0; const bviews = [], accs = [];
+  const asU8 = t => new Uint8Array(t.buffer, t.byteOffset, t.byteLength);
+  const addBV = (data, target, stride) => {
+    const pad = (4 - outLen % 4) % 4; if (pad) { chunks.push(new Uint8Array(pad)); outLen += pad; }
+    const bv = { buffer: 0, byteOffset: outLen, byteLength: data.byteLength };
+    if (target) bv.target = target; if (stride) bv.byteStride = stride;
+    chunks.push(asU8(data)); outLen += data.byteLength; bviews.push(bv); return bviews.length - 1;
+  };
+  const addAcc = (bvi, ctype, count, type, normalized, mn, mx) => {
+    const a = { bufferView: bvi, componentType: ctype, count, type };
+    if (normalized) a.normalized = true;
+    if (mn) { a.min = mn.map(Number); a.max = mx.map(Number); }
+    accs.push(a); return accs.length - 1;
+  };
+
+  // ---- images: downscale + dedupe
+  const images = [], imgRemap = {}, byHash = new Map();
+  for (let idx = 0; idx < IMGS.length; idx++) {
+    const im = IMGS[idx]; const bv = BV[im.bufferView];
+    let data = BIN.slice(bv.byteOffset || 0, (bv.byteOffset || 0) + bv.byteLength);
+    const h = await sha1hex(data);
+    if (byHash.has(h)) { imgRemap[idx] = byHash.get(h); continue; }
+    try { data = await resizeImage(data, im.mimeType, MAX_TEX); } catch (e) { /* keep original */ }
+    images.push({ bufferView: addBV(data), mimeType: im.mimeType });
+    byHash.set(h, images.length - 1); imgRemap[idx] = images.length - 1;
+    if (idx % 10 === 9) log(`Текстуры: ${idx + 1} из ${IMGS.length}`, true);
+  }
+  if (IMGS.length) log(`Текстуры: ${IMGS.length} → ${images.length} (одинаковые склеены, большие ужаты до ${MAX_TEX} px)`);
+
+  const quantPos = (P, lo, hi) => {
+    const span = [0, 1, 2].map(k => Math.max(hi[k] - lo[k], 1e-6));
+    const n = P.length / 3, q = new Uint16Array(n * 4);
+    for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) {
+      let v = roundHalfEven((P[i * 3 + k] - lo[k]) / span[k] * 65535);
+      q[i * 4 + k] = v < 0 ? 0 : v > 65535 ? 65535 : v;
+    }
+    return q;
+  };
+  const packNormals = Nr => {
+    const n = Nr.length / 3, b = new Int8Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      const x = Nr[i * 3], y = Nr[i * 3 + 1], z = Nr[i * 3 + 2], l = Math.max(Math.hypot(x, y, z), 1e-9);
+      for (let k = 0; k < 3; k++) { const v = roundHalfEven(Nr[i * 3 + k] / l * 127); b[i * 4 + k] = v < -127 ? -127 : v > 127 ? 127 : v; }
+    }
+    return b;
+  };
+  const writePrim = (P, Nr, UV, I, mat, lo, hi) => {
+    const pq = quantPos(P, lo, hi), n = P.length / 3;
+    const mn = [65535, 65535, 65535], mx = [0, 0, 0];
+    for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) { const v = pq[i * 4 + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v; }
+    const attrs = { POSITION: addAcc(addBV(pq, 34962, 8), 5123, n, 'VEC3', false, mn, mx) };
+    if (Nr) attrs.NORMAL = addAcc(addBV(packNormals(Nr), 34962, 4), 5120, n, 'VEC3', true);
+    if (UV) attrs.TEXCOORD_0 = addAcc(addBV(UV instanceof Float32Array ? UV : Float32Array.from(UV), 34962), 5126, n, 'VEC2');
+    const ib = n <= 65535 ? Uint16Array.from(I) : Uint32Array.from(I);
+    const prim = { attributes: attrs, indices: addAcc(addBV(ib, 34963), n <= 65535 ? 5123 : 5125, I.length, 'SCALAR') };
+    if (mat !== null) prim.material = mat;             // never write material: null
+    return prim;
+  };
+
+  // ---- instancing (mirrored copies get their own mirrored geometry)
+  const nodesOut = [], meshesOut = [], flat = new Map();
+  const pushFlat = (mat, item) => { if (!flat.has(mat)) flat.set(mat, []); flat.get(mat).push(item); };
+  let nInstGroups = 0, nInst = 0;
+  const groups = [];
+  for (const [ks, Ms] of uses) {
+    const pos = [], neg = [];
+    for (const M of Ms) (det3(M) > 0 ? pos.push(M) : neg.push(mirrorCol(M)));
+    if (pos.length) groups.push([ks, false, pos]);
+    if (neg.length) groups.push([ks, true, neg]);
+  }
+  for (const [ks, mirrored, Ms] of groups) {
+    const mat = keyInfo.get(ks)[4];
+    if (Ms.length >= MIN_INST) {
+      const good = [], bad = [];
+      for (const M of Ms) { const d = decompose(M); d ? good.push([M, d]) : bad.push(M); }
+      if (good.length >= MIN_INST) {
+        for (const M of bad) pushFlat(mat, [ks, mirrored ? mirrorCol(M) : M]);
+        let { P, N: Nr, UV: UVs, I, nv } = geom(ks);
+        if (mirrored) {
+          for (let i = 0; i < P.length; i += 3) P[i] = -P[i];
+          if (Nr) for (let i = 0; i < Nr.length; i += 3) Nr[i] = -Nr[i];
+          const J2 = new Uint32Array(I.length);
+          for (let t = 0; t < I.length; t += 3) { J2[t] = I[t + 2]; J2[t + 1] = I[t + 1]; J2[t + 2] = I[t]; }
+          I = J2;
+        }
+        const [lo, hi] = minmax3(P);
+        let UV = null;
+        if (mat !== null && textured[mat]) UV = UVs || new Float32Array(nv * 2);
+        meshesOut.push({ primitives: [writePrim(P, Nr, UV, I, mat, lo, hi)] });
+        const span = spanOf(lo, hi), n = good.length;
+        const T = new Float32Array(n * 3), Q = new Float32Array(n * 4), S = new Float32Array(n * 3);
+        good.forEach(([M, [t, q, s]], j) => {         // bake dequantization into instance TRS
+          for (let r = 0; r < 3; r++) T[j * 3 + r] = t[r] + M[r * 4] * lo[0] + M[r * 4 + 1] * lo[1] + M[r * 4 + 2] * lo[2];
+          Q.set(q, j * 4);
+          for (let k = 0; k < 3; k++) S[j * 3 + k] = s[k] * span[k];
+        });
+        const ext = { attributes: {
+          TRANSLATION: addAcc(addBV(T), 5126, n, 'VEC3'),
+          ROTATION: addAcc(addBV(Q), 5126, n, 'VEC4'),
+          SCALE: addAcc(addBV(S), 5126, n, 'VEC3') } };
+        nodesOut.push({ mesh: meshesOut.length - 1, extensions: { EXT_mesh_gpu_instancing: ext } });
+        nInstGroups++; nInst += n;
+        continue;
+      }
+    }
+    for (const M of Ms) pushFlat(mat, [ks, mirrored ? mirrorCol(M) : M]);
+  }
+  log(`Повторяющиеся детали: ${nInstGroups} групп, ${nInst} копий`);
+
+  // ---- flattened, merged per material
+  const allLo = [Infinity, Infinity, Infinity], allHi = [-Infinity, -Infinity, -Infinity];
+  const baked = new Map();
+  for (const [mat, items] of flat) {
+    const useUV = mat !== null && textured[mat];
+    const list = []; baked.set(mat, list);
+    for (const [ks, M] of items) {
+      const { P, N: Nsrc, UV: UVs, I, nv } = geom(ks);
+      const Pw = new Float64Array(nv * 3), Nw = new Float64Array(nv * 3);
+      for (let i = 0; i < nv; i++) {
+        const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+        for (let r = 0; r < 3; r++) {
+          const v = M[r * 4] * x + M[r * 4 + 1] * y + M[r * 4 + 2] * z + M[r * 4 + 3];
+          Pw[i * 3 + r] = v; if (v < allLo[r]) allLo[r] = v; if (v > allHi[r]) allHi[r] = v;
+        }
+      }
+      if (Nsrc) {
+        const Mi = inv3(M);                    // n' = n @ inv(L)  (inverse-transpose)
+        for (let i = 0; i < nv; i++) {
+          const x = Nsrc[i * 3], y = Nsrc[i * 3 + 1], z = Nsrc[i * 3 + 2];
+          for (let c = 0; c < 3; c++) Nw[i * 3 + c] = x * Mi[c] + y * Mi[3 + c] + z * Mi[6 + c];
+        }
+      } else for (let i = 0; i < nv; i++) Nw[i * 3 + 1] = 1;
+      const Iw = new Uint32Array(I.length);
+      if (det3(M) < 0) for (let t = 0; t < I.length; t += 3) { Iw[t] = I[t + 2]; Iw[t + 1] = I[t + 1]; Iw[t + 2] = I[t]; }
+      else Iw.set(I);
+      const UV = useUV ? (UVs || new Float32Array(nv * 2)) : null;
+      list.push([Pw, Nw, UV, Iw]);
+    }
+  }
+  const flatPrims = [];
+  const emit = (chunk, mat) => {
+    let nv = 0, ni = 0; for (const c of chunk) { nv += c[0].length / 3; ni += c[3].length; }
+    const P = new Float64Array(nv * 3), Nr = new Float64Array(nv * 3), I = new Uint32Array(ni);
+    const UV = chunk[0][2] ? new Float32Array(nv * 2) : null;
+    let vo = 0, io = 0;
+    for (const [p, n, uv, idx] of chunk) {
+      P.set(p, vo * 3); Nr.set(n, vo * 3); if (UV) UV.set(uv, vo * 2);
+      for (let k = 0; k < idx.length; k++) I[io + k] = idx[k] + vo;
+      vo += p.length / 3; io += idx.length;
+    }
+    flatPrims.push(writePrim(P, Nr, UV, I, mat, allLo, allHi));
+  };
+  for (const [mat, items] of baked) {
+    let chunk = [], cv = 0;
+    for (const it of items) {
+      const n = it[0].length / 3;
+      if (chunk.length && cv + n > 65535) { emit(chunk, mat); chunk = []; cv = 0; }
+      chunk.push(it); cv += n;
+    }
+    if (chunk.length) emit(chunk, mat);
+  }
+  if (flatPrims.length) {
+    meshesOut.push({ primitives: flatPrims });
+    nodesOut.push({ name: 'merged', mesh: meshesOut.length - 1, translation: allLo.slice(), scale: spanOf(allLo, allHi) });
+  }
+
+  // ---- assemble GLB
+  const G = { asset: { version: '2.0', generator: 'claude-optimize-glb-js' },
+    extensionsUsed: ['KHR_mesh_quantization', 'EXT_mesh_gpu_instancing'],
+    extensionsRequired: ['KHR_mesh_quantization', 'EXT_mesh_gpu_instancing'],
+    scene: 0, scenes: [{ nodes: [nodesOut.length] }],
+    nodes: nodesOut.concat([{ name: 'root', children: nodesOut.map((_, i) => i) }]),
+    meshes: meshesOut, materials: mats,
+    textures: TEXS.map(t => ({ source: imgRemap[t.source] })),
+    images, accessors: accs, bufferViews: bviews, buffers: [{ byteLength: 0 }] };
+  { const pad = (4 - outLen % 4) % 4; if (pad) { chunks.push(new Uint8Array(pad)); outLen += pad; } }
+  G.buffers[0].byteLength = outLen;
+  if (!images.length) { delete G.images; delete G.textures; }
+  let js = new TextEncoder().encode(JSON.stringify(G));
+  const jpad = (4 - js.length % 4) % 4;
+  const total = 12 + 8 + js.length + jpad + 8 + outLen;
+  const out = new Uint8Array(total), dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true);
+  dv.setUint32(12, js.length + jpad, true); dv.setUint32(16, 0x4E4F534A, true);
+  out.set(js, 20); out.fill(0x20, 20 + js.length, 20 + js.length + jpad);
+  let o = 20 + js.length + jpad;
+  dv.setUint32(o, outLen, true); dv.setUint32(o + 4, 0x004E4942, true); o += 8;
+  for (const c of chunks) { out.set(c, o); o += c.byteLength; }
+
+  let outTris = 0;
+  for (const nd of nodesOut) {
+    const mult = nd.extensions ? accs[nd.extensions.EXT_mesh_gpu_instancing.attributes.TRANSLATION].count : 1;
+    for (const p of meshesOut[nd.mesh].primitives) outTris += accs[p.indices].count / 3 * mult;
+  }
+  return { glb: out, stats: { srcBytes: ab.byteLength, outBytes: total, srcTris, outTris,
+    draws: flatPrims.length + nInstGroups, instGroups: nInstGroups, inst: nInst, boxified: boxify.size,
+    imagesIn: IMGS.length, imagesOut: images.length } };
+}
+
+// ===== packing: base64 parts + index.html + zip (store) =====
+const B64CH = new TextEncoder().encode('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/');
+function b64encode(u8) {
+  const n = u8.length, out = new Uint8Array(Math.ceil(n / 3) * 4); let i = 0, j = 0;
+  for (; i + 2 < n; i += 3) {
+    const v = (u8[i] << 16) | (u8[i + 1] << 8) | u8[i + 2];
+    out[j++] = B64CH[v >> 18]; out[j++] = B64CH[(v >> 12) & 63]; out[j++] = B64CH[(v >> 6) & 63]; out[j++] = B64CH[v & 63];
+  }
+  if (i < n) {
+    const v = (u8[i] << 16) | ((i + 1 < n ? u8[i + 1] : 0) << 8);
+    out[j++] = B64CH[v >> 18]; out[j++] = B64CH[(v >> 12) & 63];
+    out[j++] = i + 1 < n ? B64CH[(v >> 6) & 63] : 61; out[j++] = 61;
+  }
+  return out;
+}
+const escHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function buildSite(glb, template, title) {
+  const CH = 10_500_000, files = [], parts = [];
+  for (let i = 0; i < glb.length; i += CH) {
+    const b = glb.subarray(i, i + CH), s = b64encode(b), n = parts.length;
+    files.push([`model-${n}.txt`, s]); parts.push([`model-${n}.txt`, s.length, b.length]);
+  }
+  const html = template.split('__PARTS__').join(JSON.stringify(parts)).split('__TITLE__').join(escHtml(title));
+  files.unshift(['index.html', new TextEncoder().encode(html)]);
+  return files;
+}
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(entries) {            // entries: [[path, Uint8Array]] -> array of Uint8Array pieces
+  const enc = new TextEncoder(), pieces = [], central = []; let off = 0;
+  for (const [path, data] of entries) {
+    const name = enc.encode(path), crc = crc32(data);
+    const h = new Uint8Array(30 + name.length), dv = new DataView(h.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0x0800, true);
+    dv.setUint16(8, 0, true); dv.setUint16(10, 0, true); dv.setUint16(12, 0x21, true);
+    dv.setUint32(14, crc, true); dv.setUint32(18, data.length, true); dv.setUint32(22, data.length, true);
+    dv.setUint16(26, name.length, true); dv.setUint16(28, 0, true); h.set(name, 30);
+    pieces.push(h, data);
+    const c = new Uint8Array(46 + name.length), cv = new DataView(c.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true); cv.setUint16(12, 0, true); cv.setUint16(14, 0x21, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+    cv.setUint16(28, name.length, true); cv.setUint32(42, off, true); c.set(name, 46);
+    central.push(c); off += h.length + data.length;
+  }
+  const csize = central.reduce((s, c) => s + c.length, 0);
+  const e = new Uint8Array(22), ev = new DataView(e.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, csize, true); ev.setUint32(16, off, true);
+  return pieces.concat(central, [e]);
+}
+const TRANSLIT = { а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'y',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya' };
+function slugify(s) {
+  return s.toLowerCase().split('').map(ch => TRANSLIT[ch] ?? ch).join('')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'project';
+}
+
+</script>
+<script>
+const TEMPLATE = "\u003c!DOCTYPE html>\n\u003chtml lang=\"ru\">\n\u003chead>\n\u003cmeta charset=\"utf-8\">\n\u003cmeta name=\"robots\" content=\"noindex,nofollow\">\n\u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no\">\n\u003ctitle>__TITLE__ · 3D-просмотр\u003c/title>\n\u003clink rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n\u003clink href=\"https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap\" rel=\"stylesheet\">\n\u003cstyle>\n  :root{--panel:rgba(18,20,24,.74);--panel-hi:rgba(255,255,255,.08);--line:rgba(255,255,255,.12);--text:#f3f4f6;--muted:#a3a8b3;--accent:#ffb547}\n  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}\n  html,body{margin:0;height:100%;overflow:hidden;font-family:Manrope,system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;color:var(--text);\n    background:linear-gradient(180deg,#b9c6d6 0%,#dfe5ec 55%,#eef0f2 100%)}\n  #app{position:fixed;inset:0;touch-action:none}\n  #app canvas{display:block;outline:none}\n  .panel{background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:14px}\n  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}\n  #head{position:fixed;top:14px;left:14px;padding:10px 14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 120px)}\n  #head .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent);flex:none}\n  #head b{font-weight:700;letter-spacing:.02em}\n  #head span{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n  #tools{position:fixed;top:14px;right:14px;display:flex;gap:8px}\n  .icon{width:42px;height:42px;display:grid;place-items:center;border-radius:12px}\n  .icon:hover{background:var(--panel-hi)}\n  .icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}\n  #bottom{position:fixed;left:0;right:0;bottom:14px;display:flex;flex-direction:column;align-items:center;gap:10px;pointer-events:none}\n  #bottom > *{pointer-events:auto}\n  #levels{display:flex;align-items:center;gap:4px;padding:5px}\n  .seg{padding:8px 14px;border-radius:10px;font-size:14px;font-weight:600;color:var(--muted);white-space:nowrap}\n  .seg:hover{color:var(--text)}\n  #cut{display:flex;align-items:center;gap:10px;padding:0 10px 0 12px;border-left:1px solid var(--line);margin-left:4px;height:34px}\n  #cut label{font-size:13px;color:var(--muted);white-space:nowrap}\n  #cut output{font-size:13px;min-width:62px;font-variant-numeric:tabular-nums}\n  input[type=range]{-webkit-appearance:none;appearance:none;width:140px;height:4px;border-radius:4px;background:rgba(255,255,255,.18);outline:none}\n  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);border:0}\n  input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);border:0}\n  #hint{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;padding:10px 16px;font-size:13px;color:#d6d9df;text-align:center;\n    transition:opacity .6s;max-width:calc(100% - 28px);line-height:1.5}\n  #hint.hide{opacity:0;pointer-events:none}\n  #hint b{color:var(--text);font-weight:600}\n  #loader{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(180deg,#14161a,#1d2026);z-index:10;transition:opacity .7s}\n  #loader.done{opacity:0;pointer-events:none}\n  #loader .box{width:min(360px,80vw);text-align:center}\n  #loader h1{font-size:20px;font-weight:700;margin:0 0 4px}\n  #loader p{color:var(--muted);font-size:14px;margin:0 0 22px}\n  .bar{height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden}\n  .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}\n  #lstat{margin-top:12px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}\n  #lerr{margin-top:16px;font-size:13px;color:#ff8b7b;display:none;line-height:1.5}\n  @media (max-width:640px){\n    #head span{display:none}\n    #cut label{display:none}\n    input[type=range]{width:90px}\n    .seg{padding:8px 10px}\n    #hint{bottom:80px;font-size:12px}\n  }\n\u003c/style>\n\u003cscript type=\"importmap\">\n{\"imports\":{\n  \"three\":\"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js\",\n  \"three/addons/\":\"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/\"\n}}\n\u003c/script>\n\u003c/head>\n\u003cbody>\n\u003cdiv id=\"app\">\u003c/div>\n\u003cdiv id=\"head\" class=\"panel\">\u003ci class=\"dot\">\u003c/i>\u003cb>__TITLE__\u003c/b>\u003cspan>3D-модель\u003c/span>\u003c/div>\n\u003cdiv id=\"tools\">\n  \u003cbutton class=\"icon panel\" id=\"helpBtn\" title=\"Управление\" aria-label=\"Управление\">\n    \u003csvg viewBox=\"0 0 24 24\">\u003ccircle cx=\"12\" cy=\"12\" r=\"9\"/>\u003cpath d=\"M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.3-2.5 3.8\"/>\u003cpath d=\"M12 17.2h.01\"/>\u003c/svg>\n  \u003c/button>\n  \u003cbutton class=\"icon panel\" id=\"fsBtn\" title=\"Во весь экран\" aria-label=\"Во весь экран\">\n    \u003csvg viewBox=\"0 0 24 24\">\u003cpath d=\"M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5\"/>\u003c/svg>\n  \u003c/button>\n\u003c/div>\n\u003cdiv id=\"hint\" class=\"panel\">\n  \u003cb>Вращать\u003c/b> — левая кнопка / палец · \u003cb>Сдвиг\u003c/b> — правая кнопка / два пальца ·\n  \u003cb>Масштаб\u003c/b> — колесо / щипок · \u003cb>Двойной клик\u003c/b> — подлететь к точке\n\u003c/div>\n\u003cdiv id=\"bottom\">\n  \u003cdiv id=\"levels\" class=\"panel\">\n    \u003cbutton class=\"seg\" id=\"resetBtn\">Общий вид\u003c/button>\n    \u003cdiv id=\"cut\">\u003clabel for=\"cutRange\">Срез по высоте\u003c/label>\u003cinput id=\"cutRange\" type=\"range\" min=\"0\" max=\"10\" step=\"0.05\" value=\"10\">\u003coutput id=\"cutOut\">нет\u003c/output>\u003c/div>\n  \u003c/div>\n\u003c/div>\n\u003cdiv id=\"loader\">\n  \u003cdiv class=\"box\">\n    \u003ch1>__TITLE__\u003c/h1>\n    \u003cp>Загружаем 3D-модель\u003c/p>\n    \u003cdiv class=\"bar\">\u003ci id=\"lbar\">\u003c/i>\u003c/div>\n    \u003cdiv id=\"lstat\">Подключение…\u003c/div>\n    \u003cdiv id=\"lerr\">\u003c/div>\n  \u003c/div>\n\u003c/div>\n\u003cscript type=\"module\">\nimport * as THREE from 'three';\nimport { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';\nimport { OrbitControls } from 'three/addons/controls/OrbitControls.js';\nimport { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';\n\nconst PARTS = __PARTS__;\nlet NO_CUT = 1e4;            // set from the model's height after load\n\nconst app = document.getElementById('app');\nconst IS_MOBILE = matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);\nconst MAX_TEX = IS_MOBILE ? 512 : 2048;\nconst renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE, alpha:true, powerPreference:'high-performance' });\nrenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.25 : 1.75));\nrenderer.domElement.addEventListener('webglcontextlost', e => {\n  e.preventDefault();\n  document.getElementById('loader').classList.remove('done');\n  lerr.style.display = 'block';\n  lerr.textContent = 'Устройству не хватило видеопамяти для этой модели. Попробуйте открыть на компьютере.';\n});\nrenderer.setSize(innerWidth, innerHeight);\nrenderer.setClearColor(0x000000, 0);\nrenderer.outputColorSpace = THREE.SRGBColorSpace;\nrenderer.toneMapping = THREE.ACESFilmicToneMapping;\nrenderer.toneMappingExposure = 1.05;\napp.appendChild(renderer.domElement);\n\nconst scene = new THREE.Scene();\nconst pmrem = new THREE.PMREMGenerator(renderer);\nscene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;\nscene.environmentIntensity = 0.75;\nscene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 0.9));\nconst sun = new THREE.DirectionalLight(0xfff4e5, 1.6);\nsun.position.set(40, 80, 30);\nscene.add(sun);\n\nconst camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2000);\ncamera.position.set(30, 20, 30);\nconst controls = new OrbitControls(camera, renderer.domElement);\ncontrols.enableDamping = true;\ncontrols.dampingFactor = 0.08;\ncontrols.screenSpacePanning = true;\ncontrols.zoomToCursor = true;\ncontrols.minDistance = 0.5;\ncontrols.maxDistance = 400;\ncontrols.maxPolarAngle = Math.PI * 0.92;\ncontrols.update();\n\nconst clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e5);\nrenderer.clippingPlanes = [clipPlane];\nlet cutH = NO_CUT;\nlet dirty = true;\nconst requestRender = () => { dirty = true; };\ncontrols.addEventListener('change', requestRender);\naddEventListener('resize', () => {\n  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();\n  renderer.setSize(innerWidth, innerHeight); requestRender();\n});\n\nconst cutRange = document.getElementById('cutRange');\nconst cutOut = document.getElementById('cutOut');\nlet groundY = 0;\nfunction setCut(h, fromSlider = false) {\n  cutH = h;\n  const none = h >= NO_CUT - 0.01;\n  clipPlane.constant = none ? 1e5 : h;\n  cutOut.textContent = none ? 'нет' : (h - groundY).toFixed(1).replace('.', ',') + ' м';\n  if (!fromSlider) cutRange.value = h;\n  requestRender();\n}\ncutRange.addEventListener('input', () => { flight = null; setCut(parseFloat(cutRange.value), true); });\n\nlet flight = null;\nconst ease = t => t \u003c .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;\nfunction flyTo(pos, tgt, cut, dur = 1200) {\n  flight = { t0: performance.now(), dur,\n    p0: camera.position.clone(), p1: new THREE.Vector3(...pos),\n    q0: controls.target.clone(), q1: new THREE.Vector3(...tgt),\n    c0: cutH, c1: cut ?? cutH };\n}\nlet home = null;\ndocument.getElementById('resetBtn').addEventListener('click', () => { if (home) flyTo(home.pos, home.tgt, NO_CUT); });\ncontrols.addEventListener('start', () => { if (flight) flight = null; });\n\nconst ray = new THREE.Raycaster();\nlet model = null;\nfunction pickAndFly(clientX, clientY) {\n  if (!model) return;\n  const r = renderer.domElement.getBoundingClientRect();\n  const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);\n  ray.setFromCamera(ndc, camera);\n  const hits = ray.intersectObject(model, true);\n  const hit = hits.find(h => h.point.y \u003c= (cutH >= NO_CUT - 0.01 ? 1e5 : cutH));\n  if (!hit) return;\n  const dir = camera.position.clone().sub(controls.target).normalize();\n  const dist = Math.min(camera.position.distanceTo(hit.point), 9);\n  const pos = hit.point.clone().addScaledVector(dir, Math.max(dist * 0.55, 2.5));\n  flyTo(pos.toArray(), hit.point.toArray(), cutH, 900);\n}\nrenderer.domElement.addEventListener('dblclick', e => pickAndFly(e.clientX, e.clientY));\nlet lastTap = 0, tapX = 0, tapY = 0, downAt = 0, moved = false;\nrenderer.domElement.addEventListener('pointerdown', e => { downAt = performance.now(); moved = false; tapX = e.clientX; tapY = e.clientY; });\nrenderer.domElement.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - tapX, e.clientY - tapY) > 10) moved = true; });\nrenderer.domElement.addEventListener('pointerup', e => {\n  if (e.pointerType !== 'touch' || moved || performance.now() - downAt > 300) return;\n  const now = performance.now();\n  if (now - lastTap \u003c 320) { pickAndFly(e.clientX, e.clientY); lastTap = 0; } else lastTap = now;\n});\n\nconst hint = document.getElementById('hint');\nlet hintTimer = setTimeout(() => hint.classList.add('hide'), 9000);\ndocument.getElementById('helpBtn').addEventListener('click', () => {\n  clearTimeout(hintTimer);\n  hint.classList.toggle('hide');\n  if (!hint.classList.contains('hide')) hintTimer = setTimeout(() => hint.classList.add('hide'), 9000);\n});\ndocument.getElementById('fsBtn').addEventListener('click', async () => {\n  try {\n    if (document.fullscreenElement) await document.exitFullscreen();\n    else await document.documentElement.requestFullscreen();\n  } catch (_) { /* refused by the frame */ }\n});\n\nfunction loop(now) {\n  requestAnimationFrame(loop);\n  if (flight) {\n    const k = Math.min(1, (now - flight.t0) / flight.dur), e = ease(k);\n    camera.position.lerpVectors(flight.p0, flight.p1, e);\n    controls.target.lerpVectors(flight.q0, flight.q1, e);\n    const c0 = Math.min(flight.c0, NO_CUT), c1 = Math.min(flight.c1, NO_CUT);\n    setCut(c0 + (c1 - c0) * e);\n    if (k >= 1) flight = null;\n    dirty = true;\n  }\n  if (controls.update()) dirty = true;\n  if (dirty) { renderer.render(scene, camera); dirty = false; }\n}\nrequestAnimationFrame(loop);\n\nfunction shrinkTextures(root, max) {\n  const seen = new Set();\n  root.traverse(o => {\n    if (!o.isMesh) return;\n    for (const m of [].concat(o.material)) {\n      for (const k of ['map', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) {\n        const t = m[k]; if (!t || seen.has(t)) continue; seen.add(t);\n        const img = t.image; if (!img || !img.width) continue;\n        const k2 = max / Math.max(img.width, img.height); if (k2 >= 1) continue;\n        const c = document.createElement('canvas');\n        c.width = Math.max(1, Math.round(img.width * k2)); c.height = Math.max(1, Math.round(img.height * k2));\n        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);\n        if (img.close) img.close();\n        t.image = c; t.needsUpdate = true;\n      }\n    }\n  });\n}\n\nconst lbar = document.getElementById('lbar'), lstat = document.getElementById('lstat'), lerr = document.getElementById('lerr');\nconst total = PARTS.reduce((s, p) => s + p[1], 0);\nconst totalBytes = PARTS.reduce((s, p) => s + p[2], 0);\nconst mb = b => (b / 1048576).toFixed(1).replace('.', ',');\nconst B64 = new Uint8Array(256);\n'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.split('').forEach((c, i) => { B64[c.charCodeAt(0)] = i; });\nfunction b64into(src, dst, o) {        // ASCII base64 bytes -> dst, no intermediate strings\n  let n = src.length;\n  while (n > 0 && (src[n - 1] === 61 || src[n - 1] === 10 || src[n - 1] === 13 || src[n - 1] === 32)) n--;\n  const full = n - (n % 4); let i = 0, j = o;\n  for (; i \u003c full; i += 4) {\n    const a = B64[src[i]], b = B64[src[i + 1]], c = B64[src[i + 2]], d = B64[src[i + 3]];\n    dst[j++] = (a \u003c\u003c 2) | (b >> 4); dst[j++] = ((b & 15) \u003c\u003c 4) | (c >> 2); dst[j++] = ((c & 3) \u003c\u003c 6) | d;\n  }\n  const r = n - full;\n  if (r >= 2) { const a = B64[src[i]], b = B64[src[i + 1]]; dst[j++] = (a \u003c\u003c 2) | (b >> 4);\n    if (r === 3) { const c = B64[src[i + 2]]; dst[j++] = ((b & 15) \u003c\u003c 4) | (c >> 2); } }\n  return j - o;\n}\nasync function fetchModel() {\n  const out = new Uint8Array(totalBytes);\n  const got = new Array(PARTS.length).fill(0);\n  const tick = () => {\n    const s = got.reduce((a, b) => a + b, 0);\n    lbar.style.width = (s / total * 96).toFixed(1) + '%';\n    lstat.textContent = `${mb(s * 0.75)} из ${mb(total * 0.75)} МБ`;\n  };\n  const starts = []; let acc = 0;\n  for (const p of PARTS) { starts.push(acc); acc += p[2]; }\n  const loadPart = async i => {\n    const [url, len, bytes] = PARTS[i];\n    const res = await fetch(url);\n    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);\n    const src = new Uint8Array(len); let pos = 0;\n    const reader = res.body.getReader();\n    for (;;) {\n      const { done, value } = await reader.read();\n      if (done) break;\n      if (pos + value.length > len) throw new Error(`${url}: неожиданный размер`);\n      src.set(value, pos); pos += value.length; got[i] += value.length; tick();\n    }\n    if (b64into(src.subarray(0, pos), out, starts[i]) !== bytes) throw new Error(`${url}: повреждённая часть`);\n  };\n  let next = 0;                                   // at most 2 parts in flight\n  const worker = async () => { while (next \u003c PARTS.length) await loadPart(next++); };\n  await Promise.all([worker(), worker()]);\n  return out.buffer;\n}\n\ntry {\n  const buf = await fetchModel();\n  lbar.style.width = '100%';\n  lstat.textContent = 'Подготовка модели…';\n  await new Promise(r => setTimeout(r, 30));\n  const gltf = await new Promise((res, rej) => new GLTFLoader().parse(buf, '', res, rej));\n  model = gltf.scene;\n  shrinkTextures(model, MAX_TEX);\n  model.traverse(o => {\n    if (!o.isMesh) return;\n    for (const m of [].concat(o.material)) {\n      if (m.transparent) {\n        m.depthWrite = false;\n        if (/glass|стекл|translucent|curtain|sky/i.test(m.name || '')) m.opacity = Math.min(m.opacity, 0.3);\n      }\n    }\n  });\n  scene.add(model);\n  const box = new THREE.Box3().setFromObject(model);\n  const size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());\n  groundY = box.min.y; NO_CUT = box.max.y + 0.01;\n  cutRange.min = (box.min.y + 0.05).toFixed(2); cutRange.max = NO_CUT.toFixed(2);\n  const r = size.length() * 0.5;\n  const dist = r / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2) * 0.9;\n  const dir = new THREE.Vector3(1, 0.65, 1).normalize();\n  home = { pos: ctr.clone().addScaledVector(dir, dist).toArray(), tgt: [ctr.x, box.min.y + size.y * 0.25, ctr.z] };\n  camera.position.fromArray(home.pos); controls.target.fromArray(home.tgt);\n  camera.near = Math.max(0.05, r / 2000); camera.far = r * 20; camera.updateProjectionMatrix();\n  controls.maxDistance = r * 6; controls.update();\n  setCut(NO_CUT);\n  requestRender();\n  document.getElementById('loader').classList.add('done');\n} catch (err) {\n  console.error(err);\n  lerr.style.display = 'block';\n  lerr.textContent = 'Не удалось загрузить модель: ' + (err && err.message ? err.message : err) + '. Обновите страницу или проверьте интернет.';\n}\n\u003c/script>\n\u003c/body>\n\u003c/html>\n";
+const $ = id => document.getElementById(id);
+let file = null, slugTouched = false, zipUrl = null;
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const RESERVED = ['packer'];
+function checkSlug() {
+  const s = $('slug').value.trim();
+  const ok = SLUG_RE.test(s) && !RESERVED.includes(s);
+  $('slugHint').className = 'hint' + (ok || !s ? '' : ' warn');
+  $('slugHint').textContent = !s ? 'Только латиница, цифры и дефис.' :
+    ok ? `Ссылка будет: dan4cho.github.io/${s}/` : 'Нужны маленькие латинские буквы, цифры и дефис (и не «packer»).';
+  $('go').disabled = !(file && ok);
+  if (ok && location.hostname.endsWith('github.io')) {
+    const want = s;
+    fetch(`/${s}/index.html`, { method: 'HEAD', cache: 'no-store' }).then(r => {
+      if (r.ok && $('slug').value.trim() === want) {
+        $('slugHint').className = 'hint warn';
+        $('slugHint').textContent = `Такая страница уже есть: dan4cho.github.io/${s}/ — новая её заменит.`;
+      }
+    }).catch(() => {});
+  }
+  return ok;
+}
+function setFile(f) {
+  if (!f) return;
+  if (!/\.glb$/i.test(f.name)) { $('fileInfo').innerHTML = '<span class="err">Нужен файл .glb (в SketchUp: Файл → Экспорт → Трехмерная модель → GLTF Binary)</span>'; return; }
+  file = f;
+  $('fileInfo').textContent = `${f.name} · ${(f.size / 1048576).toFixed(1).replace('.', ',')} МБ`;
+  const base = f.name.replace(/\.glb$/i, '');
+  if (!$('title').value) $('title').value = base;
+  if (!slugTouched) $('slug').value = slugify($('title').value || base);
+  checkSlug();
+}
+$('drop').onclick = () => $('file').click();
+$('file').onchange = e => setFile(e.target.files[0]);
+['dragenter', 'dragover'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+$('drop').addEventListener('drop', e => setFile(e.dataTransfer.files[0]));
+$('title').oninput = () => { if (!slugTouched) $('slug').value = slugify($('title').value); checkSlug(); };
+$('slug').oninput = () => { slugTouched = true; $('slug').value = $('slug').value.toLowerCase(); checkSlug(); };
+
+const logLines = [];
+function log(msg, replaceLast) {
+  if (replaceLast && logLines.length && logLines[logLines.length - 1].startsWith(msg.split(':')[0])) logLines[logLines.length - 1] = msg;
+  else logLines.push(msg);
+  $('log').textContent = logLines.join('\n'); $('log').scrollTop = 1e9;
+}
+const setBar = p => { $('bar').style.width = p + '%'; };
+const tick = () => new Promise(r => setTimeout(r, 30));
+
+async function resizeImage(data, mime, max) {
+  const bmp = await createImageBitmap(new Blob([data], { type: mime }));
+  if (Math.max(bmp.width, bmp.height) <= max) { bmp.close(); return data; }
+  const k = max / Math.max(bmp.width, bmp.height);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, c.width, c.height); bmp.close();
+  const blob = await new Promise(r => c.toBlob(r, mime === 'image/png' ? 'image/png' : 'image/jpeg', 0.85));
+  if (!blob) return data;
+  return new Uint8Array(await blob.arrayBuffer());
+}
+const mb = b => (b / 1048576).toFixed(1).replace('.', ',') + ' МБ';
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' млн' : n >= 1e3 ? Math.round(n / 1e3) + ' тыс.' : String(n);
+
+$('go').onclick = async () => {
+  if (!checkSlug() || !file) return;
+  const slug = $('slug').value.trim(), title = ($('title').value.trim() || slug);
+  $('go').disabled = true; $('result').classList.add('hidden'); $('progress').classList.remove('hidden');
+  logLines.length = 0; $('log').classList.remove('err'); setBar(3);
+  try {
+    log(`Читаю ${file.name}…`); await tick();
+    const ab = await file.arrayBuffer(); setBar(10);
+    log('Сжимаю модель (на больших файлах страница может подвиснуть секунд на 10–30)…'); await tick();
+    const { glb, stats } = await optimizeGLB(ab, { resizeImage, log: (m, r) => log(m, r) });
+    setBar(75);
+    log(`Модель: ${mb(stats.srcBytes)} → ${mb(stats.outBytes)}`); await tick();
+    log('Упаковываю страницу…'); await tick();
+    const files = buildSite(glb, TEMPLATE, title);
+    setBar(85); await tick();
+    const pieces = makeZip(files.map(([n, d]) => [`${slug}/${n}`, d]));
+    if (zipUrl) URL.revokeObjectURL(zipUrl);
+    zipUrl = URL.createObjectURL(new Blob(pieces, { type: 'application/zip' }));
+    setBar(100);
+    log(`Готово: папка ${slug}, файлов ${files.length}.`);
+
+    $('sSize').textContent = mb(stats.outBytes);
+    $('sTris').textContent = fmt(Math.round(stats.outTris));
+    $('sDraws').textContent = fmt(stats.draws);
+    const adv = [];
+    if (stats.outBytes > 60 * 1048576) adv.push('Модель тяжёлая: на айфоне может не открыться. Облегчи в SketchUp (люди, растения, техника, мелкие детали).');
+    if (stats.draws > 1500) adv.push('Много отдельных объектов, на слабых телефонах может тормозить.');
+    $('advice').textContent = adv.join(' ');
+    $('dl').href = zipUrl; $('dl').download = `${slug}.zip`;
+    document.querySelectorAll('.slugName').forEach(e => e.textContent = slug);
+    $('finalUrl').textContent = `https://dan4cho.github.io/${slug}/`;
+    $('result').classList.remove('hidden');
+    $('result').scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    console.error(err);
+    log('Ошибка: ' + (err && err.message ? err.message : err));
+    $('log').classList.add('err');
+  } finally {
+    $('go').disabled = false;
+  }
+};
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('finalUrl').textContent); $('copy').textContent = 'Скопировано'; }
+  catch (_) { $('copy').textContent = 'Выдели и скопируй'; }
+  setTimeout(() => $('copy').textContent = 'Скопировать', 2000);
+};
+</script>
+</body>
+</html>
