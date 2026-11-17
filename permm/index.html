@@ -33,17 +33,24 @@
   #joy{position:fixed;left:22px;bottom:96px;width:124px;height:124px;border-radius:50%;display:none;touch-action:none;z-index:5}
   #joy i{position:absolute;left:50%;top:50%;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(255,255,255,.25);border:1px solid var(--line);pointer-events:none}
   body.walk.touch #joy{display:block}
-  body.walk.touch #hint{bottom:auto;top:70px}
   #cut{display:flex;align-items:center;gap:10px;padding:0 10px 0 12px;border-left:1px solid var(--line);margin-left:4px;height:34px}
   #cut label{font-size:13px;color:var(--muted);white-space:nowrap}
   #cut output{font-size:13px;min-width:62px;font-variant-numeric:tabular-nums}
   input[type=range]{-webkit-appearance:none;appearance:none;width:140px;height:4px;border-radius:4px;background:rgba(255,255,255,.18);outline:none}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent);border:0}
   input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);border:0}
-  #hint{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;padding:10px 16px;font-size:13px;color:#d6d9df;text-align:center;
-    transition:opacity .6s;max-width:calc(100% - 28px);line-height:1.5}
-  #hint.hide{opacity:0;pointer-events:none}
-  #hint b{color:var(--text);font-weight:600}
+  #help{position:fixed;top:64px;right:14px;width:272px;padding:12px 14px;font-size:13px;line-height:1.45;color:#d6d9df;
+    max-height:calc(100% - 160px);overflow:auto}
+  #help.hide{display:none}
+  #help h3{margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+  #help h3 + .rows{margin-bottom:12px}
+  #help .rows div{display:flex;justify-content:space-between;gap:10px;padding:2px 0}
+  #help .rows div span:first-child{color:var(--text);font-weight:600;white-space:nowrap}
+  #help .rows div span:last-child{text-align:right;color:var(--muted)}
+  #help .btns div{padding:3px 0}
+  #help .btns b{color:var(--text);font-weight:600}
+  #help .btns span{color:var(--muted)}
+  #helpBtn.on{color:var(--accent)}
   #loader{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(180deg,#14161a,#1d2026);z-index:10;transition:opacity .7s}
   #loader.done{opacity:0;pointer-events:none}
   #loader .box{width:min(360px,80vw);text-align:center}
@@ -53,12 +60,17 @@
   .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
   #lstat{margin-top:12px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
   #lerr{margin-top:16px;font-size:13px;color:#ff8b7b;display:none;line-height:1.5}
+  @media (max-width:380px){
+    input[type=range]{width:62px}
+    #cut{gap:6px;padding:0 6px 0 8px}
+    #cut output{min-width:40px}
+  }
   @media (max-width:640px){
     #head span{display:none}
     #cut label{display:none}
     input[type=range]{width:90px}
     .seg{padding:8px 10px}
-    #hint{bottom:80px;font-size:12px}
+    #help{width:min(230px,calc(100% - 28px));font-size:12px;padding:10px 12px}
   }
 </style>
 <script type="importmap">
@@ -79,7 +91,7 @@
     <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
   </button>
 </div>
-<div id="hint" class="panel"></div>
+<div id="help" class="panel"></div>
 <div id="bottom">
   <div id="levels" class="panel">
     <button class="seg" id="resetBtn">Общий вид</button>
@@ -291,14 +303,19 @@ window.__viewer = { camera, controls, get walk() { return walk; }, get model() {
 let look = null;
 renderer.domElement.addEventListener('pointerdown', e => {
   if (!walk) return;
-  look = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  if (e.pointerType === 'mouse' && e.button !== 0) return;      // look only while the left button is held
+  look = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType !== 'mouse' };
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener('pointermove', e => {
   if (!walk || !look || e.pointerId !== look.id) return;
-  const k = e.pointerType === 'touch' ? 0.006 : 0.0045;
-  walk.yaw += (e.clientX - look.x) * k;
-  walk.pitch = THREE.MathUtils.clamp(walk.pitch + (e.clientY - look.y) * k, -1.45, 1.45);
+  const dx = e.clientX - look.x, dy = e.clientY - look.y;
+  if (look.touch) {           // finger drags the view (Street View style)
+    walk.yaw += dx * 0.006; walk.pitch += dy * 0.006;
+  } else {                    // mouse with LMB held: game-style, mouse right = look right, up = look up
+    walk.yaw -= dx * 0.0045; walk.pitch -= dy * 0.0045;
+  }
+  walk.pitch = THREE.MathUtils.clamp(walk.pitch, -1.45, 1.45);
   look.x = e.clientX; look.y = e.clientY;
   if (!walkFly) aim();
   requestRender();
@@ -372,23 +389,35 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (now - lastTap < 320) { pickAndFly(e.clientX, e.clientY); lastTap = 0; } else lastTap = now;
 });
 
-const hint = document.getElementById('hint');
-const HINTS = {
-  orbit: IS_MOBILE ? '<b>Вращать</b> — палец · <b>Сдвиг</b> — два пальца · <b>Масштаб</b> — щипок · <b>Двойной тап</b> — подлететь к точке'
-                   : '<b>Вращать</b> — левая кнопка · <b>Сдвиг</b> — правая кнопка · <b>Масштаб</b> — колесо · <b>Двойной клик</b> — подлететь к точке',
-  walk: IS_MOBILE ? '<b>Идти</b> — джойстик слева · <b>Смотреть</b> — палец · <b>Двойной тап</b> — перейти в точку'
-                  : '<b>Идти</b> — W A S D · <b>Повернуть</b> — ← → · <b>Смотреть</b> — тянуть мышью · <b>Shift</b> — быстрее · <b>Q / E</b> — вниз / вверх · <b>Двойной клик</b> — перейти в точку'
+const help = document.getElementById('help'), helpBtn = document.getElementById('helpBtn');
+const CTRL = {
+  orbit: IS_MOBILE
+    ? [['Вращать', 'вести пальцем'], ['Сдвигать', 'два пальца'], ['Масштаб', 'щипок'], ['Подлететь к точке', 'двойной тап']]
+    : [['Вращать', 'зажать ЛКМ и вести'], ['Сдвигать', 'зажать ПКМ и вести'], ['Масштаб', 'колесо мыши'], ['Подлететь к точке', 'двойной клик']],
+  walk: IS_MOBILE
+    ? [['Идти', 'джойстик слева'], ['Смотреть', 'вести пальцем'], ['Перейти в точку', 'двойной тап']]
+    : [['Идти', 'W A S D'], ['Смотреть', 'зажать ЛКМ и вести'], ['Повернуться', '← →'], ['Быстрее', 'зажать Shift'],
+       ['Вниз / вверх', 'Q / E'], ['Перейти в точку', 'двойной клик']]
 };
-let hintTimer = null;
-function showHint() {
-  hint.innerHTML = HINTS[walk ? 'walk' : 'orbit'];
-  hint.classList.remove('hide'); clearTimeout(hintTimer);
-  hintTimer = setTimeout(() => hint.classList.add('hide'), 9000);
+function renderHelp() {
+  const rows = CTRL[walk ? 'walk' : 'orbit'].map(([a, b]) => `<div><span>${a}</span><span>${b}</span></div>`).join('');
+  help.innerHTML =
+    `<h3>${walk ? 'Прогулка' : 'Обзор'} — управление</h3><div class="rows">${rows}</div>` +
+    `<h3>Кнопки внизу</h3><div class="btns">` +
+    `<div><b>Общий вид</b> <span>— показать всю модель целиком</span></div>` +
+    (walk ? `<div><b>Обзор</b> <span>— выйти из прогулки и снова вращать модель</span></div>`
+          : `<div><b>Прогулка</b> <span>— вид от первого лица, как будто ходишь внутри</span></div>`) +
+    `<div><b>Срез по высоте</b> <span>— срезать модель сверху, чтобы заглянуть внутрь</span></div></div>`;
 }
-showHint();
-document.getElementById('helpBtn').addEventListener('click', () => {
-  if (hint.classList.contains('hide')) showHint(); else { clearTimeout(hintTimer); hint.classList.add('hide'); }
-});
+const showHint = renderHelp;   // called on mode switch
+let helpOpen = true;
+try { helpOpen = localStorage.getItem('viewerHelp') !== '0'; } catch (_) {}
+function setHelp(open) {
+  helpOpen = open; help.classList.toggle('hide', !open); helpBtn.classList.toggle('on', open);
+  try { localStorage.setItem('viewerHelp', open ? '1' : '0'); } catch (_) {}
+}
+renderHelp(); setHelp(helpOpen);
+helpBtn.addEventListener('click', () => setHelp(!helpOpen));
 document.getElementById('fsBtn').addEventListener('click', async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();

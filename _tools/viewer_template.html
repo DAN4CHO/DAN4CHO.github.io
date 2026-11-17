@@ -60,6 +60,11 @@
   .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
   #lstat{margin-top:12px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
   #lerr{margin-top:16px;font-size:13px;color:#ff8b7b;display:none;line-height:1.5}
+  @media (max-width:380px){
+    input[type=range]{width:62px}
+    #cut{gap:6px;padding:0 6px 0 8px}
+    #cut output{min-width:40px}
+  }
   @media (max-width:640px){
     #head span{display:none}
     #cut label{display:none}
