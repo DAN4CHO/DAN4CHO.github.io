@@ -351,7 +351,9 @@ function snapToFloor() {
   if (!walk || walkFly) return;
   // start a bit above the eyes so a release inside a floor slab still finds the slab's top
   const h = castFirst(camera.position.clone().add(new THREE.Vector3(0, 0.4, 0)), DOWN, 0.4 + EYE + 2.5);
-  if (h && Math.abs(h.point.y + EYE - camera.position.y) > 0.05) startWalkFly(h.point, 350, true);
+  if (!h) { walk.grounded = false; return; }                     // nothing close below: hover like a drone
+  if (Math.abs(h.point.y + EYE - camera.position.y) > 0.05) startWalkFly(h.point, 350, true);
+  else walk.grounded = true;
 }
 for (const [id, dir] of [['upBtn', 1], ['downBtn', -1]]) {
   const b = document.getElementById(id);
@@ -376,12 +378,18 @@ joyEl.addEventListener('pointermove', e => { if (e.pointerId === joy.id) moveJoy
   if (e.pointerId === joy.id) { joy.id = null; joy.x = joy.y = 0; knob.style.transform = ''; }
 }));
 
+let lastProbe = 0;
+function probeFloor() {          // walking off a stage / mezzanine edge: drop to the floor below (never climb)
+  const foot = camera.position.y - EYE;
+  const h = castFirst(new THREE.Vector3(camera.position.x, foot + 0.05, camera.position.z), DOWN);
+  walk.fallTo = (h && h.distance > 0.12) ? h.point.y : null;
+}
 function stepWalk(dt) {
   if (walkFly) {
     const k = Math.min(1, (performance.now() - walkFly.t0) / walkFly.dur), e = ease(k);
     camera.position.lerpVectors(walkFly.p0, walkFly.p1, e);
     walk.pitch = walkFly.pitch0 + (walkFly.pitch1 - walkFly.pitch0) * e;
-    aim(); if (k >= 1) walkFly = null;
+    aim(); if (k >= 1) { walkFly = null; walk.grounded = true; walk.fallTo = null; }
     return true;
   }
   let f = 0, s = 0, u = 0, turn = 0;
@@ -394,14 +402,25 @@ function stepWalk(dt) {
   if (keys.has('KeyE')) u += 1;
   if (keys.has('KeyQ')) u -= 1;
   f += joy.y; s += joy.x; u += vert;
-  if (!f && !s && !u && !turn) return false;
-  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? 6 : 2.2;
-  walk.yaw += turn * 1.8 * dt;
-  const fw = fwdOf(walk.yaw, 0), right = new THREE.Vector3(-fw.z, 0, fw.x);
-  camera.position.addScaledVector(fw, f * speed * dt).addScaledVector(right, s * speed * dt);
-  camera.position.y += u * 3 * dt;
-  aim();
-  return true;
+  let changed = false;
+  if (f || s || u || turn) {
+    const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? 6 : 2.2;
+    walk.yaw += turn * 1.8 * dt;
+    const fw = fwdOf(walk.yaw, 0), right = new THREE.Vector3(-fw.z, 0, fw.x);
+    camera.position.addScaledVector(fw, f * speed * dt).addScaledVector(right, s * speed * dt);
+    if (u) { camera.position.y += u * 3 * dt; walk.grounded = false; walk.fallTo = null; }
+    changed = true;
+    const now = performance.now();
+    if (walk.grounded && (f || s) && now - lastProbe > 150) { lastProbe = now; probeFloor(); }
+  }
+  if (walk.grounded && walk.fallTo != null) {          // smooth drop, ~6 m/s
+    const target = walk.fallTo + EYE;
+    camera.position.y = Math.max(target, camera.position.y - 6 * dt);
+    if (camera.position.y <= target + 1e-3) walk.fallTo = null;
+    changed = true;
+  }
+  if (changed) aim();
+  return changed;
 }
 
 renderer.domElement.addEventListener('dblclick', e => pickAndFly(e.clientX, e.clientY));
