@@ -29,6 +29,11 @@
   #levels{display:flex;align-items:center;gap:4px;padding:5px}
   .seg{padding:8px 14px;border-radius:10px;font-size:14px;font-weight:600;color:var(--muted);white-space:nowrap}
   .seg:hover{color:var(--text)}
+  .seg.on{color:var(--accent)}
+  #joy{position:fixed;left:22px;bottom:96px;width:124px;height:124px;border-radius:50%;display:none;touch-action:none;z-index:5}
+  #joy i{position:absolute;left:50%;top:50%;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(255,255,255,.25);border:1px solid var(--line);pointer-events:none}
+  body.walk.touch #joy{display:block}
+  body.walk.touch #hint{bottom:auto;top:70px}
   #cut{display:flex;align-items:center;gap:10px;padding:0 10px 0 12px;border-left:1px solid var(--line);margin-left:4px;height:34px}
   #cut label{font-size:13px;color:var(--muted);white-space:nowrap}
   #cut output{font-size:13px;min-width:62px;font-variant-numeric:tabular-nums}
@@ -74,16 +79,15 @@
     <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
   </button>
 </div>
-<div id="hint" class="panel">
-  <b>Вращать</b> — левая кнопка / палец · <b>Сдвиг</b> — правая кнопка / два пальца ·
-  <b>Масштаб</b> — колесо / щипок · <b>Двойной клик</b> — подлететь к точке
-</div>
+<div id="hint" class="panel"></div>
 <div id="bottom">
   <div id="levels" class="panel">
     <button class="seg" id="resetBtn">Общий вид</button>
+    <button class="seg" id="walkBtn" title="Вид от первого лица">Прогулка</button>
     <div id="cut"><label for="cutRange">Срез по высоте</label><input id="cutRange" type="range" min="0" max="10" step="0.05" value="10"><output id="cutOut">нет</output></div>
   </div>
 </div>
+<div id="joy" class="panel"><i></i></div>
 <div id="loader">
   <div class="box">
     <h1>PERMM</h1>
@@ -116,8 +120,8 @@ renderer.domElement.addEventListener('webglcontextlost', e => {
 renderer.setSize(innerWidth, innerHeight);
 renderer.setClearColor(0x000000, 0);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.0;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -174,24 +178,190 @@ function flyTo(pos, tgt, cut, dur = 1200) {
     c0: cutH, c1: cut ?? cutH };
 }
 let home = null;
-document.getElementById('resetBtn').addEventListener('click', () => { if (home) flyTo(home.pos, home.tgt, NO_CUT); });
+document.getElementById('resetBtn').addEventListener('click', () => { if (walk) exitWalk(false); if (home) flyTo(home.pos, home.tgt, NO_CUT); });
 controls.addEventListener('start', () => { if (flight) flight = null; });
 
 const ray = new THREE.Raycaster();
 let model = null;
-function pickAndFly(clientX, clientY) {
-  if (!model) return;
+const DOWN = new THREE.Vector3(0, -1, 0);
+const cutLimit = () => (cutH >= NO_CUT - 0.01 ? 1e5 : cutH) + 1e-3;
+function castFirst(origin, dir, far = Infinity) {
+  ray.set(origin, dir); ray.far = far;
+  const hits = ray.intersectObject(model, true);
+  ray.far = Infinity;
+  return hits.find(h => h.point.y <= cutLimit()) || null;
+}
+function screenHit(clientX, clientY) {
   const r = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
-  const hits = ray.intersectObject(model, true);
-  const hit = hits.find(h => h.point.y <= (cutH >= NO_CUT - 0.01 ? 1e5 : cutH));
+  return ray.intersectObject(model, true).find(h => h.point.y <= cutLimit()) || null;
+}
+function pickAndFly(clientX, clientY) {
+  if (!model) return;
+  if (walk) { walkTo(clientX, clientY); return; }
+  const hit = screenHit(clientX, clientY);
   if (!hit) return;
   const dir = camera.position.clone().sub(controls.target).normalize();
   const dist = Math.min(camera.position.distanceTo(hit.point), 9);
   const pos = hit.point.clone().addScaledVector(dir, Math.max(dist * 0.55, 2.5));
   flyTo(pos.toArray(), hit.point.toArray(), cutH, 900);
 }
+
+// ---------- first-person walk ----------
+const EYE = 1.65;
+let walk = null, walkFly = null, lastNow = performance.now();
+const keys = new Set();
+const joy = { x: 0, y: 0, id: null };
+const walkBtn = document.getElementById('walkBtn');
+if (IS_MOBILE) document.body.classList.add('touch');
+const fwdOf = (yaw, pitch) => new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+function aim() { camera.lookAt(camera.position.clone().add(fwdOf(walk.yaw, walk.pitch))); }
+function standPoint(hit, from) {          // floor point to stand on for a clicked surface
+  const p = hit.point.clone();
+  const down = castFirst(p.clone().add(new THREE.Vector3(0, 0.05, 0)), DOWN, 0.25);
+  if (down) return down.point;                                   // clicked a floor-like surface
+  const back = from.clone().sub(p); back.y = 0;                  // clicked a wall: step back and drop
+  if (back.lengthSq() < 1e-6) back.set(0, 0, 1);
+  const q = p.clone().add(back.normalize().multiplyScalar(1.2)); q.y += 0.05;
+  const f = castFirst(q, DOWN);
+  return f ? f.point : new THREE.Vector3(q.x, groundY, q.z);
+}
+const UP = new THREE.Vector3(0, 1, 0);
+function isStandable(p) {                 // a real floor: flat around the point and no ceiling at head height
+  for (const [dx, dz] of [[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4]]) {
+    const h = castFirst(new THREE.Vector3(p.x + dx, p.y + 0.3, p.z + dz), DOWN, 0.6);
+    if (!h || Math.abs(h.point.y - p.y) > 0.25) return false;
+  }
+  return !castFirst(new THREE.Vector3(p.x, p.y + 0.1, p.z), UP, 1.9);
+}
+function clearYaw(eye, yaw) {             // turn away from a wall right in front of the eyes
+  let best = yaw, bestD = -1;
+  for (const off of [0, 0.5, -0.5, 1.05, -1.05, 1.57, -1.57, 2.36, -2.36, 3.14]) {
+    const h = castFirst(eye, fwdOf(yaw + off, 0));
+    const d = h ? h.distance : 1e9;
+    if (d >= 5) return yaw + off;
+    if (d > bestD) { bestD = d; best = yaw + off; }
+  }
+  return best;
+}
+function startWalkFly(foot, dur = 900) {
+  walkFly = { t0: performance.now(), dur, p0: camera.position.clone(), p1: foot.clone().add(new THREE.Vector3(0, EYE, 0)),
+              pitch0: walk.pitch, pitch1: Math.max(-0.35, Math.min(0.1, walk.pitch)) };
+}
+function enterWalk() {
+  if (!model || walk) return;
+  flight = null;
+  const d = new THREE.Vector3(); camera.getWorldDirection(d);
+  walk = { yaw: Math.atan2(d.x, d.z), pitch: Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) };
+  ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const hits = ray.intersectObject(model, true).filter(h => h.point.y <= cutLimit());
+  let foot = null;
+  for (const h of hits.slice(0, 16)) if (isStandable(h.point) && (!foot || h.point.y < foot.y - 0.3)) foot = h.point.clone();   // lowest real floor along the view
+  if (!foot && hits.length) foot = standPoint(hits[0], camera.position);
+  if (!foot) {
+    const t = controls.target.clone(); t.y = Math.min(cutLimit() - 0.01, NO_CUT);
+    const f = castFirst(t, DOWN); foot = f ? f.point : new THREE.Vector3(controls.target.x, groundY, controls.target.z);
+  }
+  walk.yaw = clearYaw(foot.clone().add(new THREE.Vector3(0, EYE, 0)), walk.yaw);
+  walk.pitch = Math.max(-0.35, walk.pitch);
+  controls.enabled = false;
+  camera.near = 0.05; camera.updateProjectionMatrix();
+  startWalkFly(foot, 1100);
+  document.body.classList.add('walk'); walkBtn.classList.add('on'); walkBtn.textContent = 'Обзор';
+  showHint(); requestRender();
+}
+function exitWalk(keepView = true) {
+  if (!walk) return;
+  const f = fwdOf(walk.yaw, walk.pitch);
+  walk = null; walkFly = null; keys.clear(); joy.x = joy.y = 0;
+  controls.target.copy(camera.position).addScaledVector(f, 4);
+  controls.enabled = true; controls.update();
+  document.body.classList.remove('walk'); walkBtn.classList.remove('on'); walkBtn.textContent = 'Прогулка';
+  showHint(); requestRender();
+}
+function walkTo(clientX, clientY) {
+  const hit = screenHit(clientX, clientY);
+  if (hit) startWalkFly(standPoint(hit, camera.position), 800);
+}
+walkBtn.addEventListener('click', () => (walk ? exitWalk() : enterWalk()));
+window.__viewer = { camera, controls, get walk() { return walk; }, get model() { return model; }, screenHit, castFirst, standPoint };
+
+// look around: drag on the canvas (grab-the-world style)
+let look = null;
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!walk) return;
+  look = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!walk || !look || e.pointerId !== look.id) return;
+  const k = e.pointerType === 'touch' ? 0.006 : 0.0045;
+  walk.yaw += (e.clientX - look.x) * k;
+  walk.pitch = THREE.MathUtils.clamp(walk.pitch + (e.clientY - look.y) * k, -1.45, 1.45);
+  look.x = e.clientX; look.y = e.clientY;
+  if (!walkFly) aim();
+  requestRender();
+});
+['pointerup', 'pointercancel'].forEach(ev => renderer.domElement.addEventListener(ev, e => { if (look && e.pointerId === look.id) look = null; }));
+renderer.domElement.addEventListener('wheel', e => {
+  if (!walk || walkFly) return;
+  e.preventDefault();
+  const f = fwdOf(walk.yaw, 0);
+  camera.position.addScaledVector(f, THREE.MathUtils.clamp(-e.deltaY * 0.004, -1.5, 1.5));
+  requestRender();
+}, { passive: false });
+const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight'];
+addEventListener('keydown', e => {
+  if (!walk || !MOVE_KEYS.includes(e.code)) return;
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') document.activeElement.blur();
+  keys.add(e.code); e.preventDefault();
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+// joystick (phones)
+const joyEl = document.getElementById('joy'), knob = joyEl.firstElementChild;
+function moveJoy(e) {
+  const r = joyEl.getBoundingClientRect();
+  let dx = (e.clientX - (r.left + r.width / 2)) / (r.width / 2), dy = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
+  const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; }
+  joy.x = dx; joy.y = -dy; knob.style.transform = `translate(${dx * 37}px,${dy * 37}px)`;
+}
+joyEl.addEventListener('pointerdown', e => { e.preventDefault(); joy.id = e.pointerId; joyEl.setPointerCapture(e.pointerId); moveJoy(e); });
+joyEl.addEventListener('pointermove', e => { if (e.pointerId === joy.id) moveJoy(e); });
+['pointerup', 'pointercancel'].forEach(ev => joyEl.addEventListener(ev, e => {
+  if (e.pointerId === joy.id) { joy.id = null; joy.x = joy.y = 0; knob.style.transform = ''; }
+}));
+
+function stepWalk(dt) {
+  if (walkFly) {
+    const k = Math.min(1, (performance.now() - walkFly.t0) / walkFly.dur), e = ease(k);
+    camera.position.lerpVectors(walkFly.p0, walkFly.p1, e);
+    walk.pitch = walkFly.pitch0 + (walkFly.pitch1 - walkFly.pitch0) * e;
+    aim(); if (k >= 1) walkFly = null;
+    return true;
+  }
+  let f = 0, s = 0, u = 0, turn = 0;
+  if (keys.has('KeyW') || keys.has('ArrowUp')) f += 1;
+  if (keys.has('KeyS') || keys.has('ArrowDown')) f -= 1;
+  if (keys.has('KeyD')) s += 1;
+  if (keys.has('KeyA')) s -= 1;
+  if (keys.has('ArrowLeft')) turn += 1;
+  if (keys.has('ArrowRight')) turn -= 1;
+  if (keys.has('KeyE')) u += 1;
+  if (keys.has('KeyQ')) u -= 1;
+  f += joy.y; s += joy.x;
+  if (!f && !s && !u && !turn) return false;
+  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? 6 : 2.2;
+  walk.yaw += turn * 1.8 * dt;
+  const fw = fwdOf(walk.yaw, 0), right = new THREE.Vector3(-fw.z, 0, fw.x);
+  camera.position.addScaledVector(fw, f * speed * dt).addScaledVector(right, s * speed * dt);
+  camera.position.y += u * 2 * dt;
+  aim();
+  return true;
+}
+
 renderer.domElement.addEventListener('dblclick', e => pickAndFly(e.clientX, e.clientY));
 let lastTap = 0, tapX = 0, tapY = 0, downAt = 0, moved = false;
 renderer.domElement.addEventListener('pointerdown', e => { downAt = performance.now(); moved = false; tapX = e.clientX; tapY = e.clientY; });
@@ -203,11 +373,21 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 
 const hint = document.getElementById('hint');
-let hintTimer = setTimeout(() => hint.classList.add('hide'), 9000);
+const HINTS = {
+  orbit: IS_MOBILE ? '<b>Вращать</b> — палец · <b>Сдвиг</b> — два пальца · <b>Масштаб</b> — щипок · <b>Двойной тап</b> — подлететь к точке'
+                   : '<b>Вращать</b> — левая кнопка · <b>Сдвиг</b> — правая кнопка · <b>Масштаб</b> — колесо · <b>Двойной клик</b> — подлететь к точке',
+  walk: IS_MOBILE ? '<b>Идти</b> — джойстик слева · <b>Смотреть</b> — палец · <b>Двойной тап</b> — перейти в точку'
+                  : '<b>Идти</b> — W A S D · <b>Повернуть</b> — ← → · <b>Смотреть</b> — тянуть мышью · <b>Shift</b> — быстрее · <b>Q / E</b> — вниз / вверх · <b>Двойной клик</b> — перейти в точку'
+};
+let hintTimer = null;
+function showHint() {
+  hint.innerHTML = HINTS[walk ? 'walk' : 'orbit'];
+  hint.classList.remove('hide'); clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => hint.classList.add('hide'), 9000);
+}
+showHint();
 document.getElementById('helpBtn').addEventListener('click', () => {
-  clearTimeout(hintTimer);
-  hint.classList.toggle('hide');
-  if (!hint.classList.contains('hide')) hintTimer = setTimeout(() => hint.classList.add('hide'), 9000);
+  if (hint.classList.contains('hide')) showHint(); else { clearTimeout(hintTimer); hint.classList.add('hide'); }
 });
 document.getElementById('fsBtn').addEventListener('click', async () => {
   try {
@@ -218,16 +398,21 @@ document.getElementById('fsBtn').addEventListener('click', async () => {
 
 function loop(now) {
   requestAnimationFrame(loop);
-  if (flight) {
-    const k = Math.min(1, (now - flight.t0) / flight.dur), e = ease(k);
-    camera.position.lerpVectors(flight.p0, flight.p1, e);
-    controls.target.lerpVectors(flight.q0, flight.q1, e);
-    const c0 = Math.min(flight.c0, NO_CUT), c1 = Math.min(flight.c1, NO_CUT);
-    setCut(c0 + (c1 - c0) * e);
-    if (k >= 1) flight = null;
-    dirty = true;
+  const dt = Math.min(0.1, (now - lastNow) / 1000); lastNow = now;
+  if (walk) {
+    if (stepWalk(dt)) dirty = true;
+  } else {
+    if (flight) {
+      const k = Math.min(1, (now - flight.t0) / flight.dur), e = ease(k);
+      camera.position.lerpVectors(flight.p0, flight.p1, e);
+      controls.target.lerpVectors(flight.q0, flight.q1, e);
+      const c0 = Math.min(flight.c0, NO_CUT), c1 = Math.min(flight.c1, NO_CUT);
+      setCut(c0 + (c1 - c0) * e);
+      if (k >= 1) flight = null;
+      dirty = true;
+    }
+    if (controls.update()) dirty = true;
   }
-  if (controls.update()) dirty = true;
   if (dirty) { renderer.render(scene, camera); dirty = false; }
 }
 requestAnimationFrame(loop);
@@ -308,9 +493,13 @@ try {
   const gltf = await new Promise((res, rej) => new GLTFLoader().parse(buf, '', res, rej));
   model = gltf.scene;
   shrinkTextures(model, MAX_TEX);
+  const is8bit = v => Math.abs(v * 255 - Math.round(v * 255)) < 1e-3;
   model.traverse(o => {
     if (!o.isMesh) return;
     for (const m of [].concat(o.material)) {
+      if (m.color && !m.userData.srgbFixed && is8bit(m.color.r) && is8bit(m.color.g) && is8bit(m.color.b)) {
+        m.color.convertSRGBToLinear(); m.userData.srgbFixed = true;   // SketchUp colors are sRGB 0..255 values
+      }
       if (m.transparent) {
         m.depthWrite = false;
         if (/glass|стекл|translucent|curtain|sky/i.test(m.name || '')) m.opacity = Math.min(m.opacity, 0.3);
