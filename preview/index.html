@@ -349,8 +349,9 @@ addEventListener('keyup', e => {
 let vert = 0;
 function snapToFloor() {
   if (!walk || walkFly) return;
-  const h = castFirst(camera.position.clone(), DOWN, EYE + 1.6);
-  if (h && Math.abs(h.distance - EYE) > 0.05) startWalkFly(h.point, 350, true);
+  // start a bit above the eyes so a release inside a floor slab still finds the slab's top
+  const h = castFirst(camera.position.clone().add(new THREE.Vector3(0, 0.4, 0)), DOWN, 0.4 + EYE + 2.5);
+  if (h && Math.abs(h.point.y + EYE - camera.position.y) > 0.05) startWalkFly(h.point, 350, true);
 }
 for (const [id, dir] of [['upBtn', 1], ['downBtn', -1]]) {
   const b = document.getElementById(id);
