@@ -125,9 +125,14 @@ let NO_CUT = 1e4;            // set from the model's height after load
 
 const app = document.getElementById('app');
 const IS_MOBILE = matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-const MAX_TEX = IS_MOBILE ? 512 : 2048;
-const renderer = new THREE.WebGLRenderer({ antialias: !IS_MOBILE, alpha:true, powerPreference:'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.25 : 1.75));
+const MAX_TEX = IS_MOBILE ? 1024 : 2048;               // phones: actual cap chosen by texCapFor() within a memory budget
+const MOBILE_TEX_BUDGET = 160e6;                       // bytes of texture memory (with mipmaps) a phone may use
+const DPR = window.devicePixelRatio || 1;
+const BASE_PR = Math.min(DPR, IS_MOBILE ? 1.25 : 1.75); // while the camera moves: smooth
+const HI_PR = Math.min(DPR, 2);                        // when the camera stops: one sharp frame
+let curPR = BASE_PR, lastMove = 0;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(curPR);
 renderer.domElement.addEventListener('webglcontextlost', e => {
   e.preventDefault();
   document.getElementById('loader').classList.remove('done');
@@ -302,7 +307,7 @@ function walkTo(clientX, clientY) {
   if (hit) startWalkFly(standPoint(hit, camera.position), 800);
 }
 walkBtn.addEventListener('click', () => (walk ? exitWalk() : enterWalk()));
-window.__viewer = { camera, controls, get walk() { return walk; }, get model() { return model; }, screenHit, castFirst, standPoint, step: dt => stepWalk(dt), snapToFloor: () => snapToFloor(), setVert: d => { vert = d; } };
+window.__viewer = { camera, controls, get walk() { return walk; }, get model() { return model; }, screenHit, castFirst, standPoint, get texCap() { return texCap; }, get pixelRatio() { return curPR; }, step: dt => stepWalk(dt), snapToFloor: () => snapToFloor(), setVert: d => { vert = d; } };
 
 // look around: drag on the canvas (grab-the-world style)
 let look = null;
@@ -486,10 +491,25 @@ function loop(now) {
     }
     if (controls.update()) dirty = true;
   }
-  if (dirty) { renderer.render(scene, camera); dirty = false; }
+  if (dirty) {
+    if (curPR !== BASE_PR) { curPR = BASE_PR; renderer.setPixelRatio(curPR); }
+    renderer.render(scene, camera); dirty = false; lastMove = now;
+  } else if (curPR !== HI_PR && model && now - lastMove > 250) {     // camera at rest: re-render sharper once
+    curPR = HI_PR; renderer.setPixelRatio(curPR); renderer.render(scene, camera);
+  }
 }
 requestAnimationFrame(loop);
 
+const TEX_KEYS = ['map', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap'];
+function texCapFor(root) {      // phones: biggest texture size whose total GPU memory fits the budget
+  if (!IS_MOBILE) return MAX_TEX;
+  const imgs = new Set();
+  root.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) for (const k of TEX_KEYS) { const t = m[k]; if (t && t.image && t.image.width) imgs.add(t.image); } });
+  const memAt = cap => { let b = 0; for (const im of imgs) { const k = Math.min(1, cap / Math.max(im.width, im.height)); b += Math.round(im.width * k) * Math.round(im.height * k) * 4 * 4 / 3; } return b; };
+  for (const cap of [1024, 768, 512]) if (memAt(cap) <= MOBILE_TEX_BUDGET) return cap;
+  return 512;
+}
+let texCap = MAX_TEX;
 function shrinkTextures(root, max) {
   const seen = new Set();
   root.traverse(o => {
@@ -565,7 +585,8 @@ try {
   await new Promise(r => setTimeout(r, 30));
   const gltf = await new Promise((res, rej) => new GLTFLoader().parse(buf, '', res, rej));
   model = gltf.scene;
-  shrinkTextures(model, MAX_TEX);
+  texCap = texCapFor(model);
+  shrinkTextures(model, texCap);
   const is8bit = v => Math.abs(v * 255 - Math.round(v * 255)) < 1e-3;
   model.traverse(o => {
     if (!o.isMesh) return;
