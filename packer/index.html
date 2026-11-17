@@ -47,6 +47,11 @@
   .link code{font-size:14px}
   .err{color:var(--warn)}
   .hidden{display:none}
+  .batch{display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(0,0,0,.2);border-radius:10px;padding:10px 12px;margin-top:8px}
+  .batch b{font-size:14px}
+  .batch span{display:block;font-size:12.5px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace}
+  .batch a{white-space:nowrap;font-weight:600;text-decoration:none}
+  .batch.done{opacity:.45}
   .foot{color:var(--muted);font-size:13px;text-align:center;margin-top:24px}
 </style>
 </head>
@@ -84,11 +89,12 @@
     <div id="advice" class="hint warn"></div>
     <a class="main" id="dl" download>Скачать ZIP</a>
     <ol style="margin-top:20px">
-      <li>Распакуй ZIP (правой кнопкой → «Извлечь всё»). Внутри будет папка <code class="slugName"></code>.</li>
-      <li>Открой <a href="https://github.com/DAN4CHO/DAN4CHO.github.io/upload/main" target="_blank" rel="noopener">страницу загрузки на GitHub</a> (нужно быть залогиненным).</li>
-      <li>Перетащи туда <b>папку <code class="slugName"></code> целиком</b>, а не файлы из неё.</li>
-      <li>Дождись, пока все файлы загрузятся, и нажми зелёную кнопку <b>Commit changes</b> внизу.</li>
-      <li>Через 1–2 минуты страница будет готова:
+      <li>Распакуй ZIP (правой кнопкой → «Извлечь всё»). Внутри будет папка <code class="slugName"></code> с файлами.</li>
+      <li>Залей файлы на GitHub <b>по партиям</b>: всё сразу GitHub через браузер не берёт. Для каждой партии:
+        открой её ссылку, перетащи <b>только перечисленные файлы</b> из папки <code class="slugName"></code>, дождись загрузки и нажми зелёную <b>Commit changes</b> внизу.
+        <div id="batches"></div>
+      </li>
+      <li>Через 1–2 минуты после последней партии страница готова:
         <div class="link"><code id="finalUrl"></code><button class="ghost" id="copy">Скопировать</button></div>
       </li>
     </ol>
@@ -503,15 +509,24 @@ function b64encode(u8) {
   return out;
 }
 const escHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-function buildSite(glb, template, title) {
-  const CH = 10_500_000, files = [], parts = [];
+function buildSite(glb, template, title, CH = 4_500_000) {   // 4.5 MB -> 6 MB base64 per part (browser upload limits)
+  const files = [], parts = [];
   for (let i = 0; i < glb.length; i += CH) {
     const b = glb.subarray(i, i + CH), s = b64encode(b), n = parts.length;
     files.push([`model-${n}.txt`, s]); parts.push([`model-${n}.txt`, s.length, b.length]);
   }
   const html = template.split('__PARTS__').join(JSON.stringify(parts)).split('__TITLE__').join(escHtml(title));
-  files.unshift(['index.html', new TextEncoder().encode(html)]);
+  files.push(['index.html', new TextEncoder().encode(html)]);   // last: the page goes live only after all parts
   return files;
+}
+function batchFiles(files, limit = 18_000_000) {              // upload batches for the GitHub web uploader
+  const batches = []; let cur = [], size = 0;
+  for (const f of files) {
+    if (cur.length && size + f[1].length > limit) { batches.push(cur); cur = []; size = 0; }
+    cur.push(f[0]); size += f[1].length;
+  }
+  if (cur.length) batches.push(cur);
+  return batches;
 }
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
@@ -641,6 +656,16 @@ $('go').onclick = async () => {
     $('advice').textContent = adv.join(' ');
     $('dl').href = zipUrl; $('dl').download = `${slug}.zip`;
     document.querySelectorAll('.slugName').forEach(e => e.textContent = slug);
+    const up = `https://github.com/DAN4CHO/DAN4CHO.github.io/upload/main/${slug}`;
+    const bl = batchFiles(files);
+    $('batches').innerHTML = '';
+    bl.forEach((names, i) => {
+      const d = document.createElement('div'); d.className = 'batch';
+      d.innerHTML = `<div><b>Партия ${i + 1} из ${bl.length}</b><span>${names.join(', ')}</span></div>`;
+      const a = document.createElement('a'); a.href = up; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Открыть загрузку →';
+      a.onclick = () => setTimeout(() => d.classList.add('done'), 500);
+      d.appendChild(a); $('batches').appendChild(d);
+    });
     $('finalUrl').textContent = `https://dan4cho.github.io/${slug}/`;
     $('result').classList.remove('hidden');
     $('result').scrollIntoView({ behavior: 'smooth' });
