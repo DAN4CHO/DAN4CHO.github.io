@@ -239,7 +239,7 @@ function clearYaw(eye, yaw) {             // turn away from a wall right in fron
   for (const off of [0, 0.5, -0.5, 1.05, -1.05, 1.57, -1.57, 2.36, -2.36, 3.14]) {
     const h = castFirst(eye, fwdOf(yaw + off, 0));
     const d = h ? h.distance : 1e9;
-    if (d >= 3) return yaw + off;
+    if (d >= 5) return yaw + off;
     if (d > bestD) { bestD = d; best = yaw + off; }
   }
   return best;
@@ -256,7 +256,7 @@ function enterWalk() {
   ray.setFromCamera(new THREE.Vector2(0, 0), camera);
   const hits = ray.intersectObject(model, true).filter(h => h.point.y <= cutLimit());
   let foot = null;
-  for (const h of hits.slice(0, 12)) if (isStandable(h.point)) { foot = h.point.clone(); break; }
+  for (const h of hits.slice(0, 16)) if (isStandable(h.point) && (!foot || h.point.y < foot.y - 0.3)) foot = h.point.clone();   // lowest real floor along the view
   if (!foot && hits.length) foot = standPoint(hits[0], camera.position);
   if (!foot) {
     const t = controls.target.clone(); t.y = Math.min(cutLimit() - 0.01, NO_CUT);
