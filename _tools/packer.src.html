@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Упаковщик 3D-моделей</title>
+<style>
+  :root{--bg1:#14161a;--bg2:#1d2026;--panel:rgba(255,255,255,.045);--line:rgba(255,255,255,.1);--text:#f3f4f6;--muted:#a3a8b3;--accent:#ffb547;--ok:#7ad38f;--warn:#ff8b7b}
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:linear-gradient(180deg,var(--bg1),var(--bg2));color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px;line-height:1.5}
+  main{max-width:640px;margin:0 auto;padding:40px 20px 60px}
+  h1{font-size:24px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  h1 i{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .sub{color:var(--muted);margin:0 0 28px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 14px;font-weight:600}
+  #drop{border:2px dashed rgba(255,255,255,.18);border-radius:12px;padding:30px 16px;text-align:center;cursor:pointer;transition:.2s}
+  #drop:hover,#drop.over{border-color:var(--accent);background:rgba(255,181,71,.06)}
+  #drop b{display:block;font-size:16px;margin-bottom:4px}
+  #drop span{color:var(--muted);font-size:14px}
+  label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+  input[type=text]{width:100%;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:10px;color:var(--text);font:inherit;padding:10px 12px;outline:none}
+  input[type=text]:focus{border-color:var(--accent)}
+  .addr{display:flex;align-items:center;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:10px;padding-left:12px}
+  .addr span{color:var(--muted);white-space:nowrap}
+  .addr input{border:0;background:none;padding-left:0}
+  .hint{font-size:13px;color:var(--muted);margin-top:6px}
+  .hint.warn{color:var(--accent)}
+  button.main,a.main{display:inline-flex;align-items:center;justify-content:center;gap:8px;margin-top:18px;width:100%;padding:13px;border:0;border-radius:12px;
+    background:var(--accent);color:#1b1407;font:inherit;font-weight:700;cursor:pointer;text-decoration:none}
+  button.main:disabled{opacity:.35;cursor:default}
+  .ghost{background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
+  #log{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted);white-space:pre-wrap;max-height:220px;overflow:auto}
+  .bar{height:6px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden;margin-bottom:12px}
+  .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:6px}
+  .stats div{background:rgba(0,0,0,.2);border-radius:10px;padding:10px 12px}
+  .stats b{display:block;font-size:18px}
+  .stats span{font-size:12px;color:var(--muted)}
+  ol{margin:0;padding-left:20px}
+  ol li{margin-bottom:8px}
+  a{color:var(--accent)}
+  code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:5px;font-size:.92em}
+  .link{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+  .link code{font-size:14px}
+  .err{color:var(--warn)}
+  .hidden{display:none}
+  .batch{display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(0,0,0,.2);border-radius:10px;padding:10px 12px;margin-top:8px}
+  .batch b{font-size:14px}
+  .batch span{display:block;font-size:12.5px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace}
+  .batch a{white-space:nowrap;font-weight:600;text-decoration:none}
+  .batch.done{opacity:.45}
+  .foot{color:var(--muted);font-size:13px;text-align:center;margin-top:24px}
+</style>
+</head>
+<body>
+<main>
+  <h1><i></i>Упаковщик 3D-моделей</h1>
+  <p class="sub">GLB из SketchUp → страница с 3D для клиента на dan4cho.github.io</p>
+
+  <div class="card">
+    <h2>1. Модель</h2>
+    <div id="drop"><b>Перетащи сюда .glb</b><span>или нажми, чтобы выбрать файл</span></div>
+    <input type="file" id="file" accept=".glb" hidden>
+    <div id="fileInfo" class="hint"></div>
+    <label for="title">Название на странице</label>
+    <input type="text" id="title" placeholder="Например: PERMM">
+    <label for="slug">Адрес страницы</label>
+    <div class="addr"><span>dan4cho.github.io/</span><input type="text" id="slug" placeholder="permm" spellcheck="false"><span style="padding-right:12px">/</span></div>
+    <div id="slugHint" class="hint">Только латиница, цифры и дефис.</div>
+    <button class="main" id="go" disabled>Собрать</button>
+  </div>
+
+  <div class="card hidden" id="progress">
+    <h2>2. Сборка</h2>
+    <div class="bar"><i id="bar"></i></div>
+    <div id="log"></div>
+  </div>
+
+  <div class="card hidden" id="result">
+    <h2>3. Залить на GitHub</h2>
+    <div class="stats">
+      <div><b id="sSize"></b><span>вес модели</span></div>
+      <div><b id="sTris"></b><span>треугольников</span></div>
+      <div><b id="sDraws"></b><span>отрисовок</span></div>
+    </div>
+    <div id="advice" class="hint warn"></div>
+    <a class="main" id="dl" download>Скачать ZIP</a>
+    <ol style="margin-top:20px">
+      <li>Распакуй ZIP (правой кнопкой → «Извлечь всё»). Внутри будет папка <code class="slugName"></code> с файлами.</li>
+      <li>Залей файлы на GitHub <b>по партиям</b>: всё сразу GitHub через браузер не берёт. Для каждой партии:
+        открой её ссылку, перетащи <b>только перечисленные файлы</b> из папки <code class="slugName"></code>, дождись загрузки и нажми зелёную <b>Commit changes</b> внизу.
+        <div id="batches"></div>
+      </li>
+      <li>Через 1–2 минуты после последней партии страница готова:
+        <div class="link"><code id="finalUrl"></code><button class="ghost" id="copy">Скопировать</button></div>
+      </li>
+    </ol>
+    <p class="hint">Если папка с таким адресом уже была, новые файлы её заменят, а ссылка останется прежней. После обновления, если видна старая версия, обнови страницу с очисткой кэша (Ctrl+F5).</p>
+  </div>
+
+  <p class="foot">Всё считается у тебя в браузере, модель никуда не отправляется.</p>
+</main>
+
+<script>
+/*__CORE__*/
+</script>
+<script>
+const TEMPLATE = __TEMPLATE_JSON__;
+const $ = id => document.getElementById(id);
+let file = null, slugTouched = false, zipUrl = null;
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const RESERVED = ['packer'];
+function checkSlug() {
+  const s = $('slug').value.trim();
+  const ok = SLUG_RE.test(s) && !RESERVED.includes(s);
+  $('slugHint').className = 'hint' + (ok || !s ? '' : ' warn');
+  $('slugHint').textContent = !s ? 'Только латиница, цифры и дефис.' :
+    ok ? `Ссылка будет: dan4cho.github.io/${s}/` : 'Нужны маленькие латинские буквы, цифры и дефис (и не «packer»).';
+  $('go').disabled = !(file && ok);
+  if (ok && location.hostname.endsWith('github.io')) {
+    const want = s;
+    fetch(`/${s}/index.html`, { method: 'HEAD', cache: 'no-store' }).then(r => {
+      if (r.ok && $('slug').value.trim() === want) {
+        $('slugHint').className = 'hint warn';
+        $('slugHint').textContent = `Такая страница уже есть: dan4cho.github.io/${s}/ — новая её заменит.`;
+      }
+    }).catch(() => {});
+  }
+  return ok;
+}
+function setFile(f) {
+  if (!f) return;
+  if (!/\.glb$/i.test(f.name)) { $('fileInfo').innerHTML = '<span class="err">Нужен файл .glb (в SketchUp: Файл → Экспорт → Трехмерная модель → GLTF Binary)</span>'; return; }
+  file = f;
+  $('fileInfo').textContent = `${f.name} · ${(f.size / 1048576).toFixed(1).replace('.', ',')} МБ`;
+  const base = f.name.replace(/\.glb$/i, '');
+  if (!$('title').value) $('title').value = base;
+  if (!slugTouched) $('slug').value = slugify($('title').value || base);
+  checkSlug();
+}
+$('drop').onclick = () => $('file').click();
+$('file').onchange = e => setFile(e.target.files[0]);
+['dragenter', 'dragover'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => $('drop').addEventListener(ev, e => { e.preventDefault(); $('drop').classList.remove('over'); }));
+$('drop').addEventListener('drop', e => setFile(e.dataTransfer.files[0]));
+$('title').oninput = () => { if (!slugTouched) $('slug').value = slugify($('title').value); checkSlug(); };
+$('slug').oninput = () => { slugTouched = true; $('slug').value = $('slug').value.toLowerCase(); checkSlug(); };
+
+const logLines = [];
+function log(msg, replaceLast) {
+  if (replaceLast && logLines.length && logLines[logLines.length - 1].startsWith(msg.split(':')[0])) logLines[logLines.length - 1] = msg;
+  else logLines.push(msg);
+  $('log').textContent = logLines.join('\n'); $('log').scrollTop = 1e9;
+}
+const setBar = p => { $('bar').style.width = p + '%'; };
+const tick = () => new Promise(r => setTimeout(r, 30));
+
+async function resizeImage(data, mime, max) {
+  const bmp = await createImageBitmap(new Blob([data], { type: mime }));
+  if (Math.max(bmp.width, bmp.height) <= max) { bmp.close(); return data; }
+  const k = max / Math.max(bmp.width, bmp.height);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, c.width, c.height); bmp.close();
+  const blob = await new Promise(r => c.toBlob(r, mime === 'image/png' ? 'image/png' : 'image/jpeg', 0.85));
+  if (!blob) return data;
+  return new Uint8Array(await blob.arrayBuffer());
+}
+const mb = b => (b / 1048576).toFixed(1).replace('.', ',') + ' МБ';
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' млн' : n >= 1e3 ? Math.round(n / 1e3) + ' тыс.' : String(n);
+
+$('go').onclick = async () => {
+  if (!checkSlug() || !file) return;
+  const slug = $('slug').value.trim(), title = ($('title').value.trim() || slug);
+  $('go').disabled = true; $('result').classList.add('hidden'); $('progress').classList.remove('hidden');
+  logLines.length = 0; $('log').classList.remove('err'); setBar(3);
+  try {
+    log(`Читаю ${file.name}…`); await tick();
+    const ab = await file.arrayBuffer(); setBar(10);
+    log('Сжимаю модель (на больших файлах страница может подвиснуть секунд на 10–30)…'); await tick();
+    const { glb, stats } = await optimizeGLB(ab, { resizeImage, log: (m, r) => log(m, r) });
+    setBar(75);
+    log(`Модель: ${mb(stats.srcBytes)} → ${mb(stats.outBytes)}`); await tick();
+    log('Упаковываю страницу…'); await tick();
+    const files = buildSite(glb, TEMPLATE, title);
+    setBar(85); await tick();
+    const pieces = makeZip(files.map(([n, d]) => [`${slug}/${n}`, d]));
+    if (zipUrl) URL.revokeObjectURL(zipUrl);
+    zipUrl = URL.createObjectURL(new Blob(pieces, { type: 'application/zip' }));
+    setBar(100);
+    log(`Готово: папка ${slug}, файлов ${files.length}.`);
+
+    $('sSize').textContent = mb(stats.outBytes);
+    $('sTris').textContent = fmt(Math.round(stats.outTris));
+    $('sDraws').textContent = fmt(stats.draws);
+    const adv = [];
+    if (stats.outBytes > 60 * 1048576) adv.push('Модель тяжёлая: на айфоне может не открыться. Облегчи в SketchUp (люди, растения, техника, мелкие детали).');
+    if (stats.draws > 1500) adv.push('Много отдельных объектов, на слабых телефонах может тормозить.');
+    $('advice').textContent = adv.join(' ');
+    $('dl').href = zipUrl; $('dl').download = `${slug}.zip`;
+    document.querySelectorAll('.slugName').forEach(e => e.textContent = slug);
+    const up = `https://github.com/DAN4CHO/DAN4CHO.github.io/upload/main/${slug}`;
+    const bl = batchFiles(files);
+    $('batches').innerHTML = '';
+    bl.forEach((names, i) => {
+      const d = document.createElement('div'); d.className = 'batch';
+      d.innerHTML = `<div><b>Партия ${i + 1} из ${bl.length}</b><span>${names.join(', ')}</span></div>`;
+      const a = document.createElement('a'); a.href = up; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Открыть загрузку →';
+      a.onclick = () => setTimeout(() => d.classList.add('done'), 500);
+      d.appendChild(a); $('batches').appendChild(d);
+    });
+    $('finalUrl').textContent = `https://dan4cho.github.io/${slug}/`;
+    $('result').classList.remove('hidden');
+    $('result').scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    console.error(err);
+    log('Ошибка: ' + (err && err.message ? err.message : err));
+    $('log').classList.add('err');
+  } finally {
+    $('go').disabled = false;
+  }
+};
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('finalUrl').textContent); $('copy').textContent = 'Скопировано'; }
+  catch (_) { $('copy').textContent = 'Выдели и скопируй'; }
+  setTimeout(() => $('copy').textContent = 'Скопировать', 2000);
+};
+</script>
+</body>
+</html>
